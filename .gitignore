@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+data/projects/
+data/audio/
+data/images/
+data/videos/
+data/exports/
+data/

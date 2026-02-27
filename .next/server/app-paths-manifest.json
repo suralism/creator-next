@@ -1,0 +1,8 @@
+{
+  "/api/health/route": "app/api/health/route.js",
+  "/api/settings/youtube/route": "app/api/settings/youtube/route.js",
+  "/api/projects/route": "app/api/projects/route.js",
+  "/api/settings/route": "app/api/settings/route.js",
+  "/api/settings/facebook/route": "app/api/settings/facebook/route.js",
+  "/page": "app/page.js"
+}
