@@ -1,0 +1,4 @@
+file '/root/vibe/creator/data/videos/seg_b03bd013-e23f-427e-949b-49c76cc00922_0.mp4'
+file '/root/vibe/creator/data/videos/seg_b03bd013-e23f-427e-949b-49c76cc00922_1.mp4'
+file '/root/vibe/creator/data/videos/seg_b03bd013-e23f-427e-949b-49c76cc00922_2.mp4'
+file '/root/vibe/creator/data/videos/seg_b03bd013-e23f-427e-949b-49c76cc00922_3.mp4'
