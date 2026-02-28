@@ -10,8 +10,8 @@ if (!url || !authToken) {
 }
 
 const client = createClient({
-    url: url || "file:data/local.db",
-    authToken: authToken || "",
+    url: url,
+    authToken: authToken,
 });
 
 export const db = drizzle(client, { schema });

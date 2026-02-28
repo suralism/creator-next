@@ -32,6 +32,7 @@ export async function POST(request) {
                     `https://graph.facebook.com/v19.0/${videoId}?fields=views,comments.summary(true).limit(0),likes.summary(true).limit(0),shares&access_token=${fbToken}`
                 );
                 const data = await response.json();
+                console.log(`FB Stats Response for ${videoId}:`, JSON.stringify(data));
 
                 if (!data.error) {
                     stats[videoId] = {

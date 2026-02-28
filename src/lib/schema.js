@@ -8,6 +8,7 @@ export const projects = sqliteTable('projects', {
     language: text('language').default('th'),
     status: text('status').default('draft'),
     steps: text('steps').notNull(), // Stored as JSON string
+    publishHistory: text('publishHistory').default('[]'), // Stored as JSON string
     createdAt: text('createdAt').notNull(),
     updatedAt: text('updatedAt').notNull(),
 });

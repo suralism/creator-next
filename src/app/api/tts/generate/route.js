@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -55,7 +55,7 @@ function segmentText(text, maxChars = 2000) {
 
 export async function POST(request) {
     try {
-        const { text, voice, projectId } = await request.json();
+        const { text, voice, emotion, projectId } = await request.json();
 
         const apiKey = await getActiveKey();
         if (!apiKey) {
@@ -66,20 +66,7 @@ export async function POST(request) {
             return NextResponse.json({ error: 'กรุณาใส่ข้อความที่ต้องการแปลงเป็นเสียง' }, { status: 400 });
         }
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-2.5-flash-preview-tts',
-            generationConfig: {
-                responseModalities: ['audio'],
-                speechConfig: {
-                    voiceConfig: {
-                        prebuiltVoiceConfig: {
-                            voiceName: voice || 'Kore'
-                        }
-                    }
-                }
-            }
-        });
+        const ai = new GoogleGenAI({ apiKey });
 
         const audioId = uuidv4();
         const finalFileName = `${projectId || 'standalone'}_${audioId}.wav`;
@@ -94,10 +81,39 @@ export async function POST(request) {
             const chunkText = chunks[i].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
             if (!chunkText) continue;
 
-            console.log(`Generating TTS chunk ${i + 1}/${chunks.length}...`);
+            console.log(`Generating TTS chunk ${i + 1}/${chunks.length}... (Emotion: ${emotion || 'neutral'})`);
 
-            const result = await model.generateContent(chunkText);
-            const response = result.response;
+            // Give hint to model to adapt tone
+            let promptWithEmotion = chunkText;
+            if (emotion && emotion !== 'neutral') {
+                const emotionPrompts = {
+                    'happy': 'Speak the following text with a very happy, cheerful, and energetic tone: ',
+                    'sad': 'Speak the following text with a very sad, melancholic, and deeply emotional tone: ',
+                    'angry': 'Speak the following text with an angry, aggressive, and frustrated tone: ',
+                    'fearful': 'Speak the following text with a fearful, terrified, and scared tone: ',
+                    'surprised': 'Speak the following text with a very surprised, shocked, and excited tone: ',
+                    'drama': 'Speak the following text with a highly dramatic, intense, and captivating storytelling tone: ',
+                    'calm': 'Speak the following text with a very calm, peaceful, soothing, and relaxing tone, like a meditation guide or Dharma talk: ',
+                    'professional': 'Speak the following text with a confident, professional, clear, and authoritative business presentation tone: ',
+                    'serious': 'Speak the following text with a very serious, dramatic, and formal tone: '
+                };
+                promptWithEmotion = `${emotionPrompts[emotion] || ''}${chunkText}`;
+            }
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-preview-tts',
+                contents: [{ parts: [{ text: promptWithEmotion }] }],
+                config: {
+                    responseModalities: ['AUDIO'],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: {
+                                voiceName: voice || 'Kore',
+                            },
+                        },
+                    },
+                },
+            });
 
             const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
             if (!audioData) {

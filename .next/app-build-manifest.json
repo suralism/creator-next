@@ -1,3 +1,95 @@
 {
-  "pages": {}
+  "pages": {
+    "/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/layout.css",
+      "static/chunks/app/layout.js"
+    ],
+    "/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/page.js"
+    ],
+    "/api/projects/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/projects/route.js"
+    ],
+    "/api/health/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/health/route.js"
+    ],
+    "/api/settings/youtube/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/settings/youtube/route.js"
+    ],
+    "/api/publish/youtube/stats/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/publish/youtube/stats/route.js"
+    ],
+    "/api/projects/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/projects/[id]/route.js"
+    ],
+    "/api/video/check-ffmpeg/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/video/check-ffmpeg/route.js"
+    ],
+    "/api/uploads/[...path]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/uploads/[...path]/route.js"
+    ],
+    "/api/video/create/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/video/create/route.js"
+    ],
+    "/api/ai/generate-script/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/ai/generate-script/route.js"
+    ],
+    "/api/tts/generate/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/tts/generate/route.js"
+    ],
+    "/api/ai/chat/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/ai/chat/route.js"
+    ],
+    "/api/images/generate-batch/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/images/generate-batch/route.js"
+    ],
+    "/api/publish/youtube/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/publish/youtube/route.js"
+    ],
+    "/api/settings/facebook/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/settings/facebook/route.js"
+    ],
+    "/api/publish/facebook/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/publish/facebook/route.js"
+    ],
+    "/api/publish/facebook/stats/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/publish/facebook/stats/route.js"
+    ]
+  }
 }

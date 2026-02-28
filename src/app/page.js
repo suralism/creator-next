@@ -261,8 +261,15 @@ function ScriptStep() {
                 <div className="form-row">
                     <div className="form-group">
                         <label htmlFor="input-style">สไตล์การเล่า</label>
-                        <input type="text" id="input-style" placeholder="เช่น สนุก, ตลก, ให้ความรู้, ดราม่า"
-                            defaultValue="สนุก ให้ความรู้ น่าสนใจ" />
+                        <select id="input-style" defaultValue="storytelling">
+                            <option value="storytelling">📖 เล่าเรื่อง (Storytelling)</option>
+                            <option value="funny">😂 ตลกขบขัน (Funny)</option>
+                            <option value="educational">🧠 ให้ความรู้ (Educational)</option>
+                            <option value="drama">🎭 ดราม่า/น่าลุ้น (Drama)</option>
+                            <option value="inspirational">✨ สร้างแรงบันดาลใจ (Inspirational)</option>
+                            <option value="scary">👻 สยองขวัญ/ลี้ลับ (Scary)</option>
+                            <option value="news">📰 สรุปข่าว/อัปเดต (News)</option>
+                        </select>
                     </div>
                     <div className="form-group">
                         <label htmlFor="input-duration">ความยาวบท</label>
@@ -341,7 +348,7 @@ function AudioStep() {
                 <div className="form-row">
                     <div className="form-group">
                         <label htmlFor="tts-voice">เลือกเสียง</label>
-                        <select id="tts-voice">
+                        <select id="tts-voice" defaultValue="Kore">
                             <option value="Kore">Kore (หญิง)</option>
                             <option value="Zephyr">Zephyr (หญิง)</option>
                             <option value="Aoede">Aoede (หญิง)</option>
@@ -374,6 +381,21 @@ function AudioStep() {
                             <option value="Zubenelgenubi">Zubenelgenubi</option>
                         </select>
                     </div>
+                    <div className="form-group">
+                        <label htmlFor="tts-emotion">อารมณ์/น้ำเสียง</label>
+                        <select id="tts-emotion" defaultValue="neutral">
+                            <option value="neutral">😐 ปกติ (Neutral)</option>
+                            <option value="happy">😄 ร่าเริง/มีความสุข (Happy)</option>
+                            <option value="sad">😢 เศร้า (Sad)</option>
+                            <option value="angry">😠 โกรธ (Angry)</option>
+                            <option value="fearful">😨 หวาดกลัว/สยองขวัญ (Fearful)</option>
+                            <option value="surprised">😲 ประหลาดใจ/ตื่นเต้น (Surprised)</option>
+                            <option value="drama">🎭 ดราม่า/เล่าเรื่องลุ้นระทึก (Drama)</option>
+                            <option value="calm">🧘 สงบ/ผ่อนคลายบรรยายธรรม (Calm)</option>
+                            <option value="professional">💼 มืออาชีพ/เล่าธุรกิจ (Professional)</option>
+                            <option value="serious">🧐 จริงจัง/เป็นทางการ (Serious)</option>
+                        </select>
+                    </div>
                 </div>
 
                 <button className="btn btn-primary btn-lg" onClick={() => generateAudio()} id="btn-generate-audio">
@@ -395,8 +417,8 @@ function AudioStep() {
                     <button className="btn btn-ghost" onClick={() => showStep('script')}>← กลับ</button>
                     <button className="btn btn-secondary" onClick={() => showStep('images')}>ถัดไป: สร้างรูป →</button>
                 </div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }
 
@@ -524,6 +546,62 @@ function VideoStep() {
                             <option value="random">🎲 Random Mix (สุ่ม)</option>
                             <option value="none">⏹️ ไม่มี Animation</option>
                         </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="video-subtitle">📝 ซับไตเติ้ล</label>
+                        <select id="video-subtitle" defaultValue="yes" onChange={(e) => {
+                            const sty = document.getElementById('subtitle-styles-container');
+                            if (sty) sty.style.display = e.target.value === 'yes' ? 'block' : 'none';
+                        }}>
+                            <option value="yes">✅ ใส่ซับอัตโนมัติ (เปิด)</option>
+                            <option value="no">❌ ไม่ใส่ซับไตเติ้ล</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="subtitle-styles-container" style={{ display: 'block', background: 'var(--bg-input)', padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '24px', border: '1px solid var(--border-color)' }}>
+                    <h4 style={{ marginBottom: '12px', fontSize: '0.95rem' }}>🎨 ปรับแต่งสไตล์ซับไตเติ้ล</h4>
+                    <div className="form-row" style={{ marginBottom: '0' }}>
+                        <div className="form-group">
+                            <label htmlFor="sub-font">แบบฟอนต์</label>
+                            <select id="sub-font" defaultValue="Kanit">
+                                <option value="Kanit">🅰️ คณิต (Kanit) - ทันสมัย</option>
+                                <option value="Prompt">🅱️ พร้อม (Prompt) - เรียบหรู</option>
+                                <option value="Sarabun">📄 สารบรรณ (Sarabun) - ทางการ</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="sub-size">ขนาดตัวอักษร</label>
+                            <select id="sub-size" defaultValue="medium">
+                                <option value="small">เล็ก (Small)</option>
+                                <option value="medium">กลาง (Medium) - แนะนำ</option>
+                                <option value="large">ใหญ่ (Large)</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="sub-color">โทนสี</label>
+                            <select id="sub-color" defaultValue="white_black">
+                                <option value="white_black">⚪ ขาว / ขอบดำ</option>
+                                <option value="yellow_black">⭐ เหลือง / ขอบดำ</option>
+                                <option value="black_white">⚫ ดำ / ขอบขาว</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="sub-bg">ความหนาขอบ</label>
+                            <select id="sub-bg" defaultValue="normal">
+                                <option value="thin">เส้นบาง</option>
+                                <option value="normal">ปกติ - แนะนำ</option>
+                                <option value="thick">เส้นหนา</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="sub-pos">ตำแหน่ง</label>
+                            <select id="sub-pos" defaultValue="bottom">
+                                <option value="top">⬆️ ส่วนบน</option>
+                                <option value="center">⏺️ ส่วนกลาง</option>
+                                <option value="bottom">⬇️ ส่วนล่าง</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 

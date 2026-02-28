@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 import { getSettings } from '@/lib/settings';
 
 // POST /api/settings/api-keys/test
@@ -21,11 +22,13 @@ export async function POST(request) {
     }
 
     try {
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(keyToTest);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        const result = await model.generateContent('ตอบว่า "OK" แค่คำเดียว');
-        const text = result.response.text();
+        const ai = new GoogleGenAI({ apiKey: keyToTest });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: 'ตอบว่า "OK" แค่คำเดียว',
+        });
+
+        const text = response.text;
 
         return NextResponse.json({ success: true, message: `API Key ใช้งานได้! Response: ${text.substring(0, 50)}` });
     } catch (err) {

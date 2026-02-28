@@ -10,7 +10,8 @@ export async function GET() {
         const result = await db.select().from(projects).orderBy(desc(projects.updatedAt));
         const formattedProjects = result.map(row => ({
             ...row,
-            steps: JSON.parse(row.steps)
+            steps: JSON.parse(row.steps),
+            publishHistory: row.publishHistory ? JSON.parse(row.publishHistory) : []
         }));
         return NextResponse.json(formattedProjects);
     } catch (err) {
@@ -44,7 +45,7 @@ export async function POST(request) {
             updatedAt: new Date().toISOString()
         };
 
-        const dbProject = { ...project, steps: JSON.stringify(project.steps) };
+        const dbProject = { ...project, publishHistory: '[]', steps: JSON.stringify(project.steps) };
         await db.insert(projects).values(dbProject);
 
         return NextResponse.json(project, { status: 201 });

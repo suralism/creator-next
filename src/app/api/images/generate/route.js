@@ -22,9 +22,10 @@ export async function POST(request) {
         const ai = new GoogleGenAI({ apiKey });
 
         const strictNoText = "absolutely NO text, NO watermarks, NO letters, NO words, NO subtitles, NO typography, clear image";
+        const asianContext = "featuring Thai or Southeast Asian people, settings, and aesthetics. Characters should have Asian features and skin tones. Environment and background should reflect Thai or Asian culture and scenery";
         const enhancedPrompt = style
-            ? `${prompt}, style: ${style}, high quality, detailed, ${strictNoText}`
-            : `${prompt}, high quality, detailed, professional, ${strictNoText}`;
+            ? `${prompt}, style: ${style}, ${asianContext}, high quality, detailed, ${strictNoText}`
+            : `${prompt}, ${asianContext}, high quality, detailed, professional, ${strictNoText}`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-3.1-flash-image-preview',

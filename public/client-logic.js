@@ -78,6 +78,7 @@ async function loadDashboard() {
         // Count completed steps & published
         let videoCount = 0, publishedCount = 0;
         const fbVideoIds = [];
+        const ytVideoIds = [];
 
         projects.forEach(p => {
             if (p.steps?.video?.status === 'done') videoCount++;
@@ -86,6 +87,9 @@ async function loadDashboard() {
                 p.publishHistory.forEach(ph => {
                     if (ph.platform === 'facebook' && ph.videoId) {
                         fbVideoIds.push({ projectId: p.id, videoId: ph.videoId, pageId: ph.pageId });
+                    }
+                    if (ph.platform === 'youtube' && ph.videoId) {
+                        ytVideoIds.push({ projectId: p.id, videoId: ph.videoId, channelId: ph.channelId });
                     }
                 });
             }
@@ -127,13 +131,18 @@ async function loadDashboard() {
                         const typeLabel = ph.type === 'reel' ? 'Reels' : 'Video';
                         return `<a href="${ph.postUrl}" target="_blank" class="publish-badge fb-badge" onclick="event.stopPropagation()" title="Facebook ${typeLabel}">🔵 FB ${typeLabel}</a>`;
                     }
+                    if (ph.platform === 'youtube') {
+                        const typeLabel = ph.type === 'video' ? 'Video' : 'Shorts';
+                        return `<a href="${ph.postUrl}" target="_blank" class="publish-badge yt-badge" onclick="event.stopPropagation()" title="YouTube ${typeLabel}" style="background: rgba(239,68,68,0.1); color: #ef4444; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; text-decoration: none; border: 1px solid rgba(239,68,68,0.2); white-space: nowrap;">🔴 YT ${typeLabel}</a>`;
+                    }
                     return '';
-                }).filter(Boolean).join('');
+                }).filter(Boolean).join(' ');
                 publishBadges = badges || publishBadges;
             }
 
             // Engagement stats placeholder
             const statsId = `stats-${p.id}`;
+            const hasPublish = p.publishHistory?.some(ph => ph.platform === 'facebook' || ph.platform === 'youtube');
 
             return `
         <tr class="project-table-row" onclick="openProject('${p.id}')">
@@ -153,7 +162,7 @@ async function loadDashboard() {
           <td>${publishBadges}</td>
           <td>
             <div class="engagement-stats" id="${statsId}">
-              ${p.publishHistory?.length > 0 ? '<span style="color: var(--text-muted); font-size: 0.75rem;">กำลังโหลด...</span>' : '<span style="color: var(--text-muted); font-size: 0.8rem;">—</span>'}
+              ${hasPublish ? '<span style="color: var(--text-muted); font-size: 0.75rem;">กำลังโหลด...</span>' : '<span style="color: var(--text-muted); font-size: 0.8rem;">—</span>'}
             </div>
           </td>
           <td class="date-cell">${date}</td>
@@ -182,28 +191,52 @@ async function loadDashboard() {
           </table>
         `;
 
-        // Fetch Facebook stats in background
-        if (fbVideoIds.length > 0) {
-            fetchFacebookStats(projects, fbVideoIds);
+        // Fetch engagement stats in background
+        if (fbVideoIds.length > 0 || ytVideoIds.length > 0) {
+            fetchEngagementStats(projects, fbVideoIds, ytVideoIds);
         }
     } catch (err) {
         console.error('Load dashboard error:', err);
     }
 }
 
-// Fetch Facebook engagement stats
-async function fetchFacebookStats(projects, fbVideoIds) {
+// Fetch engagement stats
+async function fetchEngagementStats(projects, fbVideoIds, ytVideoIds) {
     try {
-        // Ensure unique videoIds but keep pageId
-        const uniqueReq = Array.from(new Set(fbVideoIds.map(v => v.videoId)))
-            .map(id => fbVideoIds.find(v => v.videoId === id));
+        let stats = {};
 
-        const result = await api('/publish/facebook/stats', {
-            method: 'POST',
-            body: { videoItems: uniqueReq }
-        });
+        // 1. Fetch Facebook
+        if (fbVideoIds && fbVideoIds.length > 0) {
+            const uniqueReq = Array.from(new Set(fbVideoIds.map(v => v.videoId)))
+                .map(id => fbVideoIds.find(v => v.videoId === id));
 
-        const stats = result.stats || {};
+            try {
+                const fbResult = await api('/publish/facebook/stats', {
+                    method: 'POST',
+                    body: { videoItems: uniqueReq }
+                });
+                if (fbResult.stats) {
+                    stats = { ...stats, ...fbResult.stats };
+                }
+            } catch (e) { console.error('FB Stats Err:', e) }
+        }
+
+        // 2. Fetch YouTube
+        if (ytVideoIds && ytVideoIds.length > 0) {
+            const uniqueReq = Array.from(new Set(ytVideoIds.map(v => v.videoId)))
+                .map(id => ytVideoIds.find(v => v.videoId === id));
+
+            try {
+                const ytResult = await api('/publish/youtube/stats', {
+                    method: 'POST',
+                    body: { videoItems: uniqueReq }
+                });
+                if (ytResult.stats) {
+                    stats = { ...stats, ...ytResult.stats };
+                }
+            } catch (e) { console.error('YT Stats Err:', e) }
+        }
+
         let totalViews = 0;
 
         projects.forEach(p => {
@@ -213,6 +246,7 @@ async function fetchFacebookStats(projects, fbVideoIds) {
             if (!statsEl) return;
 
             let projectViews = 0, projectComments = 0, projectLikes = 0;
+            let hasValidStats = false;
 
             p.publishHistory.forEach(ph => {
                 if (ph.videoId && stats[ph.videoId]) {
@@ -220,19 +254,23 @@ async function fetchFacebookStats(projects, fbVideoIds) {
                     projectViews += s.views;
                     projectComments += s.comments;
                     projectLikes += s.likes;
+                    hasValidStats = true;
                 }
             });
 
             totalViews += projectViews;
 
-            if (projectViews > 0 || projectComments > 0 || projectLikes > 0) {
+            if (hasValidStats) {
                 statsEl.innerHTML = `
                     <span class="eng-stat" title="ยอดวิว">👁 ${formatNumber(projectViews)}</span>
                     <span class="eng-stat" title="ถูกใจ">❤️ ${formatNumber(projectLikes)}</span>
                     <span class="eng-stat" title="คอมเมนต์">💬 ${formatNumber(projectComments)}</span>
                 `;
             } else {
-                statsEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.75rem;">รอข้อมูล</span>';
+                const isRequested = [...fbVideoIds, ...ytVideoIds].some(v => v.projectId === p.id);
+                statsEl.innerHTML = isRequested ?
+                    '<span style="color: var(--text-muted); font-size: 0.75rem;">ไม่พบข้อมูล</span>' :
+                    '<span style="color: var(--text-muted); font-size: 0.8rem;">—</span>';
             }
         });
 
@@ -912,6 +950,13 @@ window.runAutopilot = async function () {
         // Step 4: Create Video
         const videoFormat = currentProject.platform || 'youtube_shorts';
         const videoAnimation = document.getElementById('video-animation')?.value || 'pan_zoom';
+        const videoSubtitle = document.getElementById('video-subtitle')?.value === 'yes';
+
+        // Subtitle Styles
+        const subFont = document.getElementById('sub-font')?.value || 'Kanit';
+        const subSize = document.getElementById('sub-size')?.value || 'medium';
+        const subColor = document.getElementById('sub-color')?.value || 'white_black';
+        const subBg = document.getElementById('sub-bg')?.value || 'shadow';
 
         const videoRes = await api('/video/create', {
             method: 'POST',
@@ -920,7 +965,10 @@ window.runAutopilot = async function () {
                 audioFile: audioRes.filePath,
                 imageFiles: successFiles,
                 format: videoFormat,
-                animation: videoAnimation
+                animation: videoAnimation,
+                subtitle: videoSubtitle,
+                subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg },
+                scriptText: currentProject.steps.script.content
             }
         });
 
@@ -1007,11 +1055,11 @@ window.generateScript = async function () {
         if (result.imagePrompts?.length > 0) {
             const promptsList = document.getElementById('image-prompts-list');
             promptsList.innerHTML = result.imagePrompts.map(prompt => `
-            < div class="image-prompt-item" >
-                <input type="text" class="image-prompt-input" value="${escapeHtml(prompt)}">
+                <div class="image-prompt-item">
+                    <input type="text" class="image-prompt-input" value="${escapeHtml(prompt)}">
                     <button class="btn btn-sm btn-danger" onclick="removeImagePrompt(this)">✕</button>
                 </div>
-        `).join('');
+            `).join('');
         }
 
         showToast('สร้างบทสำเร็จ! ✨', 'success');
@@ -1085,6 +1133,7 @@ window.generateAudio = async function () {
     spinner.classList.remove('hidden');
 
     const voice = document.getElementById('tts-voice').value;
+    const emotion = document.getElementById('tts-emotion')?.value || 'neutral';
 
     try {
         showToast('🎙️ กำลังสร้างเสียง...', 'info');
@@ -1094,6 +1143,7 @@ window.generateAudio = async function () {
             body: {
                 text,
                 voice,
+                emotion,
                 projectId: currentProject.id
             }
         });
@@ -1145,9 +1195,9 @@ window.addImagePrompt = function () {
     const item = document.createElement('div');
     item.className = 'image-prompt-item';
     item.innerHTML = `
-            < input type = "text" class="image-prompt-input" placeholder = "อธิบายรูปที่ต้องการ (ภาษาอังกฤษ)" >
-                <button class="btn btn-sm btn-danger" onclick="removeImagePrompt(this)">✕</button>
-        `;
+        <input type="text" class="image-prompt-input" placeholder="อธิบายรูปที่ต้องการ (ภาษาอังกฤษ)">
+        <button class="btn btn-sm btn-danger" onclick="removeImagePrompt(this)">✕</button>
+    `;
     list.appendChild(item);
 };
 
@@ -1195,11 +1245,11 @@ ${script} `,
         if (Array.isArray(prompts) && prompts.length > 0) {
             const promptsList = document.getElementById('image-prompts-list');
             promptsList.innerHTML = prompts.map(prompt => `
-            < div class="image-prompt-item" >
-                <input type="text" class="image-prompt-input" value="${escapeHtml(prompt)}">
+                <div class="image-prompt-item">
+                    <input type="text" class="image-prompt-input" value="${escapeHtml(prompt)}">
                     <button class="btn btn-sm btn-danger" onclick="removeImagePrompt(this)">✕</button>
                 </div>
-        `).join('');
+            `).join('');
             showToast(`สร้าง prompt สำเร็จ ${prompts.length} รายการ! ✨`, 'success');
         }
     } catch (err) {
@@ -1285,10 +1335,10 @@ function showImagesResult(files) {
     const grid = document.getElementById('images-result');
     grid.classList.remove('hidden');
     grid.innerHTML = files.map((f, i) => `
-            < div class="image-card" >
+            <div class="image-card">
                 <img src="${f}" alt="Generated image ${i + 1}" loading="lazy">
-                    <div class="image-overlay">รูปที่ ${i + 1}</div>
-                </div>
+                <div class="image-overlay">รูปที่ ${i + 1}</div>
+            </div>
         `).join('');
 }
 
@@ -1355,6 +1405,14 @@ window.createVideo = async function () {
 
     const format = document.getElementById('video-format').value;
     const animation = document.getElementById('video-animation').value;
+    const subtitle = document.getElementById('video-subtitle')?.value === 'yes';
+
+    // Subtitle Styles
+    const subFont = document.getElementById('sub-font')?.value || 'Kanit';
+    const subSize = document.getElementById('sub-size')?.value || 'medium';
+    const subColor = document.getElementById('sub-color')?.value || 'white_black';
+    const subBg = document.getElementById('sub-bg')?.value || 'shadow';
+    const subPos = document.getElementById('sub-pos')?.value || 'bottom';
 
     try {
         showToast('🎬 กำลังสร้างวิดีโอ... อาจใช้เวลา 1-2 นาที', 'info');
@@ -1366,7 +1424,10 @@ window.createVideo = async function () {
                 audioFile: currentProject.steps.audio.filePath,
                 imageFiles: generatedImages,
                 format,
-                animation
+                animation,
+                subtitle,
+                subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg, pos: subPos },
+                scriptText: currentProject.steps.script.content
             }
         });
 
@@ -2141,6 +2202,7 @@ window.publishToYouTube = async function () {
             type: 'video',
             videoId: result.videoId,
             postUrl: result.postUrl,
+            channelId: selectedChannelId,
             scheduled: result.scheduled || false,
             scheduledTime: result.scheduledTime || null,
             publishedAt: new Date().toISOString()

@@ -25,9 +25,10 @@ export async function POST(request) {
         for (const prompt of prompts) {
             try {
                 const strictNoText = "absolutely NO text, NO watermarks, NO letters, NO words, NO subtitles, NO typography, clear image";
+                const asianContext = "featuring Thai or Southeast Asian people, settings, and aesthetics. Characters should have Asian features and skin tones. Environment and background should reflect Thai or Asian culture and scenery";
                 let enhancedPrompt = `${prompt}`;
                 if (style) enhancedPrompt += `, style: ${style}`;
-                enhancedPrompt += `, high quality, detailed, cinematic lighting, ${strictNoText}`;
+                enhancedPrompt += `, ${asianContext}, high quality, detailed, cinematic lighting, ${strictNoText}`;
 
                 if (scriptContext && scriptContext.length > 0) {
                     const briefContext = scriptContext.substring(0, 300);

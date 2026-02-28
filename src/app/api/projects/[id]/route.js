@@ -14,7 +14,11 @@ export async function GET(request, { params }) {
         }
 
         const row = result[0];
-        const project = { ...row, steps: JSON.parse(row.steps) };
+        const project = {
+            ...row,
+            steps: JSON.parse(row.steps),
+            publishHistory: row.publishHistory ? JSON.parse(row.publishHistory) : []
+        };
         return NextResponse.json(project);
     } catch (err) {
         return NextResponse.json({ error: err.message }, { status: 500 });
@@ -32,11 +36,19 @@ export async function PUT(request, { params }) {
         }
 
         const row = result[0];
-        const existingProject = { ...row, steps: JSON.parse(row.steps) };
+        const existingProject = {
+            ...row,
+            steps: JSON.parse(row.steps),
+            publishHistory: row.publishHistory ? JSON.parse(row.publishHistory) : []
+        };
         const body = await request.json();
 
         const updated = { ...existingProject, ...body, updatedAt: new Date().toISOString() };
-        const dbProject = { ...updated, steps: JSON.stringify(updated.steps) };
+        const dbProject = {
+            ...updated,
+            steps: JSON.stringify(updated.steps),
+            publishHistory: JSON.stringify(updated.publishHistory || [])
+        };
 
         await db.update(projects).set(dbProject).where(eq(projects.id, id));
         return NextResponse.json(updated);

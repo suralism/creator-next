@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { getActiveKey } from '@/lib/settings';
 
 export async function POST(request) {
@@ -11,8 +11,7 @@ export async function POST(request) {
             return NextResponse.json({ error: 'กรุณาตั้งค่า API Key ในหน้าตั้งค่า (Settings)' }, { status: 400 });
         }
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const ai = new GoogleGenAI({ apiKey });
 
         const platformGuide = {
             youtube_shorts: 'YouTube Shorts (วิดีโอสั้น 30-60 วินาที แนวตั้ง, ดึงดูดใน 3 วินาทีแรก)',
@@ -49,7 +48,7 @@ export async function POST(request) {
 2. บทพูด (script) - เขียนเป็นบทพูดที่พร้อมอ่านออกเสียง **ห้ามใส่เครื่องหมายวงเล็บ () หรือ [] โดยเด็ดขาด ห้ามใส่คำอธิบายภาพ ห้ามมี stage direction ห้ามมีอารมณ์ในวงเล็บเด็ดขาด** เขียนเฉพาะตัวหนังสือที่จะให้อ่านออกเสียงเท่านั้น ความยาวต้องตรงกับ ${durationText}
 3. คำอธิบาย (description) - สำหรับใช้เป็น caption
 4. แฮชแท็ก (hashtags) - 5-10 แฮชแท็กที่เกี่ยวข้อง
-5. คำแนะนำภาพประกอบ (imagePrompts) - อาร์เรย์ของ prompt สำหรับสร้างภาพ 3-5 ภาพ เขียนเป็นภาษาอังกฤษ
+5. คำแนะนำภาพประกอบ (imagePrompts) - อาร์เรย์ของ prompt สำหรับสร้างภาพ 3-5 ภาพ เขียนเป็นภาษาอังกฤษ **สำคัญ: ทุกภาพที่มีคนต้องระบุว่าเป็นคนไทยหรือเอเชียตะวันออกเฉียงใต้ มีลักษณะหน้าตาแบบเอเชีย ฉากหลังและบรรยากาศต้องเป็นแบบเอเชีย/ไทย ห้ามใช้คนตะวันตกเด็ดขาด**
 
 ตอบกลับเป็น JSON format:
 {
@@ -60,9 +59,12 @@ export async function POST(request) {
   "imagePrompts": ["...", "..."]
 }`;
 
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        let text = response.text();
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        let text = response.text;
 
         text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
