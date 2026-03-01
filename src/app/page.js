@@ -120,7 +120,7 @@ function DashboardPage() {
             <div className="section">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                     <h2 style={{ margin: 0 }}>โปรเจคล่าสุด</h2>
-                    <select id="filter-category" onChange={() => filterByCategory()} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text)', fontSize: '0.85rem' }}>
+                    <select id="filter-category" onChange={() => filterByCategory()} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.85rem' }}>
                         <option value="">ทั้งหมด</option>
                     </select>
                 </div>
@@ -255,7 +255,7 @@ function ProjectPage() {
                     <h1 id="project-title">โปรเจค</h1>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <p className="subtitle" id="project-subtitle" style={{ margin: 0 }}>กำลังโหลด...</p>
-                        <select id="project-category" onChange={() => changeProjectCategory()} style={{ padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text)', fontSize: '0.8rem' }}>
+                        <select id="project-category" onChange={() => changeProjectCategory()} style={{ padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.8rem' }}>
                             <option value="">ไม่ระบุหมวดหมู่</option>
                         </select>
                     </div>

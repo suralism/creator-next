@@ -1566,9 +1566,9 @@ function renderApiKeys(keys, activeKeyId) {
         return `
             <div class="key-card ${isActive ? 'active' : ''}">
         <div class="key-status"></div>
-        <div class="key-info">
+        <div class="key-info" style="flex: 1; min-width: 0;">
           <div class="key-label">${escapeHtml(k.label)} ${isActive ? '✅ Active' : ''}</div>
-          <div class="key-value">${k.key}</div>
+          <div class="key-value" style="word-break: break-all;">${k.key}</div>
           <div class="key-date">เพิ่มเมื่อ ${date}</div>
         </div>
         <div class="key-actions">
@@ -1711,7 +1711,7 @@ async function loadFacebookSettings() {
                         <span style="font-size: 1.2rem;">✅</span>
                         <div style="flex: 1; min-width: 0;">
                             <strong>${escapeHtml(p.pageName || p.pageId)}</strong>
-                            <span style="color: var(--text-muted); font-size: 0.8rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <span style="color: var(--text-muted); font-size: 0.8rem; display: block; word-break: break-all;">
                                 ID: ${p.pageId} · Token: ${p.tokenMasked}
                             </span>
                         </div>
@@ -2289,6 +2289,7 @@ window.toggleYtSchedule = toggleYtSchedule;
 loadDashboard();
 checkApiStatus();
 loadYouTubeSettings();
+loadBgmList();
 
 // Check URL for OAuth callback result
 const urlParams = new URLSearchParams(window.location.search);
