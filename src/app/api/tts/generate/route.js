@@ -36,7 +36,7 @@ function createWavHeader(pcmDataLength, sampleRate = 24000, numChannels = 1, bit
 }
 
 function segmentText(text, maxChars = 2000) {
-    const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
+    const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) || [text];
     const chunks = [];
     let currentChunk = '';
 
@@ -72,7 +72,7 @@ export async function POST(request) {
         const finalFileName = `${projectId || 'standalone'}_${audioId}.wav`;
         const finalFilePath = path.join(AUDIO_DIR, finalFileName);
 
-        const chunks = segmentText(text, 1000);
+        const chunks = segmentText(text, 2500);
         console.log(`TTS generation: Text split into ${chunks.length} chunks.`);
 
         const chunkFiles = [];

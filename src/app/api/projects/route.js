@@ -23,7 +23,7 @@ export async function GET() {
 // POST /api/projects - Create project  
 export async function POST(request) {
     try {
-        const { name, description, platform, language } = await request.json();
+        const { name, description, platform, language, category } = await request.json();
         const id = uuidv4();
 
         const steps = {
@@ -39,6 +39,7 @@ export async function POST(request) {
             description: description || '',
             platform: platform || 'youtube_shorts',
             language: language || 'th',
+            category: category || '',
             status: 'draft',
             steps,
             createdAt: new Date().toISOString(),

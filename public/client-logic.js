@@ -7,6 +7,7 @@ let currentProject = null;
 let currentStep = 'script';
 let generatedAudio = null;
 let generatedImages = [];
+let allCategories = [];
 
 // --- Navigation ---
 window.navigateTo = function (page, data) {
@@ -72,6 +73,10 @@ async function loadDashboard() {
     try {
         const projects = await api('/projects');
 
+        // Load categories
+        try { allCategories = await api('/categories'); } catch (e) { allCategories = []; }
+        populateCategoryDropdowns();
+
         // Update stats
         document.getElementById('stat-total').textContent = projects.length;
 
@@ -100,18 +105,22 @@ async function loadDashboard() {
         // Render projects
         const list = document.getElementById('projects-list');
 
-        if (projects.length === 0) {
+        // Category filter
+        const filterCatId = document.getElementById('filter-category')?.value || '';
+        const filteredProjects = filterCatId ? projects.filter(p => p.category === filterCatId) : projects;
+
+        if (filteredProjects.length === 0) {
             list.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🎪</div>
-          <h3>ยังไม่มีโปรเจค</h3>
+          <h3>ยังไม่มีโปรเจค${filterCatId ? 'ในหมวดหมู่นี้' : ''}</h3>
           <p>เริ่มสร้างโปรเจคแรกของคุณเลย!</p>
           <button class="btn btn-primary" onclick="navigateTo('create')">สร้างเลย</button>
         </div>`;
             return;
         }
 
-        const tableRows = projects.map(p => {
+        const tableRows = filteredProjects.map(p => {
             const progress = calculateProgress(p);
             const platformLabels = {
                 youtube_shorts: '📱 Shorts',
@@ -144,12 +153,15 @@ async function loadDashboard() {
             const statsId = `stats-${p.id}`;
             const hasPublish = p.publishHistory?.some(ph => ph.platform === 'facebook' || ph.platform === 'youtube');
 
+            const cat = allCategories.find(c => c.id === p.category);
+            const catBadge = cat ? `<span class="category-badge" style="background:${cat.color}22;color:${cat.color};border:1px solid ${cat.color}44;padding:2px 8px;border-radius:12px;font-size:0.7rem;">${cat.icon} ${escapeHtml(cat.name)}</span>` : '';
+
             return `
         <tr class="project-table-row" onclick="openProject('${p.id}')">
           <td>
             <div class="project-name-cell">
               <strong>${escapeHtml(p.name)}</strong>
-              <span class="project-desc">${escapeHtml(p.description || '')}</span>
+              <span class="project-desc">${escapeHtml(p.description || '')} ${catBadge}</span>
             </div>
           </td>
           <td><span class="platform-badge">${platformLabels[p.platform] || p.platform}</span></td>
@@ -299,6 +311,7 @@ window.createProject = async function () {
     const description = document.getElementById('input-description').value.trim();
     const platform = document.getElementById('input-platform').value;
     const language = document.getElementById('input-language').value;
+    const category = document.getElementById('input-category')?.value || '';
 
     if (!name) {
         showToast('กรุณาใส่ชื่อโปรเจค', 'warning');
@@ -312,7 +325,7 @@ window.createProject = async function () {
     try {
         const project = await api('/projects', {
             method: 'POST',
-            body: { name, description, platform, language }
+            body: { name, description, platform, language, category }
         });
 
         showToast('สร้างโปรเจคสำเร็จ! 🎉', 'success');
@@ -345,6 +358,18 @@ async function loadProject(projectId) {
         document.getElementById('project-title').textContent = project.name;
         document.getElementById('project-subtitle').textContent =
             `${getPlatformLabel(project.platform)} • ${project.language === 'th' ? 'ไทย' : 'English'}`;
+
+        // Populate project category dropdown
+        if (allCategories.length === 0) {
+            try { allCategories = await api('/categories'); } catch (e) { allCategories = []; }
+        }
+        const catSelect = document.getElementById('project-category');
+        if (catSelect) {
+            catSelect.innerHTML = '<option value="">ไม่ระบุหมวดหมู่</option>' + allCategories.map(c =>
+                `<option value="${c.id}">${c.icon} ${escapeHtml(c.name)}</option>`
+            ).join('');
+            catSelect.value = project.category || '';
+        }
 
         // Load script if exists
         if (project.steps?.script?.content) {
@@ -1414,6 +1439,9 @@ window.createVideo = async function () {
     const subBg = document.getElementById('sub-bg')?.value || 'shadow';
     const subPos = document.getElementById('sub-pos')?.value || 'bottom';
 
+    const bgmFile = document.getElementById('video-bgm')?.value || null;
+    const bgmVolume = document.getElementById('bgm-volume')?.value || 20;
+
     try {
         showToast('🎬 กำลังสร้างวิดีโอ... อาจใช้เวลา 1-2 นาที', 'info');
 
@@ -1427,7 +1455,9 @@ window.createVideo = async function () {
                 animation,
                 subtitle,
                 subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg, pos: subPos },
-                scriptText: currentProject.steps.script.content
+                scriptText: currentProject.steps.script.content,
+                bgmFile,
+                bgmVolume: parseFloat(bgmVolume) / 100
             }
         });
 
@@ -1508,6 +1538,11 @@ async function loadSettings() {
     } catch (err) {
         console.error('Load settings error:', err);
     }
+    // Load categories for management
+    try { allCategories = await api('/categories'); } catch (e) { allCategories = []; }
+    renderCategoryList();
+    // Load BGM list
+    await loadBgmList();
     // Also load Facebook settings
     await loadFacebookSettings();
 }
@@ -1855,17 +1890,9 @@ window.publishToFacebook = async function (type) {
             showToast('กรุณาเลือกวันเวลาที่ต้องการตั้งเวลา', 'warning');
             return;
         }
-        // Validate: must be at least 10 minutes in the future
+        // Convert to ISO string to ensure correct timezone parsing on backend (VPS might be UTC)
         const schedDate = new Date(scheduledTime);
-        const now = new Date();
-        if (schedDate <= now) {
-            showToast('เวลาที่กำหนดต้องเป็นอนาคต', 'warning');
-            return;
-        }
-        if ((schedDate - now) < 10 * 60 * 1000) {
-            showToast('Facebook ต้องตั้งเวลาล่วงหน้าอย่างน้อย 10 นาที', 'warning');
-            return;
-        }
+        scheduledTime = schedDate.toISOString();
     }
 
     const btnReel = document.getElementById('btn-fb-reel');
@@ -2136,13 +2163,9 @@ window.publishToYouTube = async function () {
             showToast('กรุณาเลือกวันเวลาที่ต้องการตั้งเวลา', 'warning');
             return;
         }
-        // Validate: must be in the future
+        // Convert to ISO string to ensure consistent timezone parsing on backend
         const schedDate = new Date(scheduledTime);
-        const now = new Date();
-        if (schedDate <= now) {
-            showToast('เวลาที่กำหนดต้องเป็นอนาคต', 'warning');
-            return;
-        }
+        scheduledTime = schedDate.toISOString();
     }
 
     const btn = document.getElementById('btn-yt-publish');
@@ -2284,4 +2307,299 @@ if (ytOauth === 'success') {
 // Re-check API status every 30 seconds
 setInterval(checkApiStatus, 30000);
 
+// --- BGM Management ---
+let allBgms = [];
 
+async function loadBgmList() {
+    try {
+        const res = await fetch('/api/bgm');
+        allBgms = await res.json();
+    } catch (e) { allBgms = []; }
+    renderBgmList();
+    populateBgmDropdown();
+}
+
+function renderBgmList() {
+    const el = document.getElementById('bgm-list');
+    if (!el) return;
+    if (allBgms.length === 0) {
+        el.innerHTML = '<p style="color: var(--text-muted); text-align: center;">ยังไม่มี BGM อัปโหลด</p>';
+        return;
+    }
+    el.innerHTML = allBgms.map(b => {
+        const sizeKb = (b.size / 1024).toFixed(0);
+        const sizeMb = (b.size / (1024 * 1024)).toFixed(1);
+        const sizeText = b.size > 1024 * 1024 ? `${sizeMb} MB` : `${sizeKb} KB`;
+        return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:var(--card-bg);margin-bottom:6px;border:1px solid var(--border-color);">
+            <div style="flex:1;">
+                <strong style="font-size:0.9rem;">${escapeHtml(b.label)}</strong>
+                <span style="color:var(--text-muted);font-size:0.75rem;margin-left:8px;">${escapeHtml(b.originalName)} (${sizeText})</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <audio src="/api/uploads/bgm/${b.fileName}" controls preload="none" style="height:32px;max-width:200px;"></audio>
+                <button class="btn btn-sm btn-danger" onclick="deleteBgm('${b.id}')" title="ลบ">🗑</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function populateBgmDropdown() {
+    const sel = document.getElementById('video-bgm');
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = '<option value="">ไม่ใส่ BGM</option>' + allBgms.map(b =>
+        `<option value="${b.fileName}">${escapeHtml(b.label)}</option>`
+    ).join('');
+    sel.value = current || '';
+}
+
+window.uploadBgm = async function () {
+    const fileInput = document.getElementById('bgm-file');
+    const label = document.getElementById('bgm-label')?.value.trim() || '';
+
+    if (!fileInput?.files?.length) {
+        showToast('กรุณาเลือกไฟล์เพลง', 'warning');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('label', label || file.name);
+
+    const btn = document.getElementById('btn-upload-bgm');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> กำลังอัปโหลด...';
+
+    try {
+        const res = await fetch('/api/bgm', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        showToast('อัปโหลด BGM สำเร็จ! 🎵', 'success');
+        fileInput.value = '';
+        document.getElementById('bgm-label').value = '';
+        await loadBgmList();
+    } catch (e) {
+        showToast('อัปโหลดล้มเหลว: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '📤 อัปโหลด BGM';
+    }
+};
+
+window.deleteBgm = async function (id) {
+    if (!confirm('ลบ BGM นี้?')) return;
+    try {
+        const res = await fetch(`/api/bgm/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Delete failed');
+        showToast('ลบ BGM สำเร็จ', 'success');
+        await loadBgmList();
+    } catch (e) {
+        showToast('ลบล้มเหลว', 'error');
+    }
+};
+// --- Category Management ---
+function populateCategoryDropdowns() {
+    const dropdowns = ['input-category', 'filter-category', 'bulk-category'];
+    dropdowns.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const currentVal = el.value;
+        const defaultOpt = id === 'filter-category' ? '<option value="">ทั้งหมด</option>' : '<option value="">— ไม่ระบุ —</option>';
+        el.innerHTML = defaultOpt + allCategories.map(c =>
+            `<option value="${c.id}">${c.icon} ${escapeHtml(c.name)}</option>`
+        ).join('');
+        el.value = currentVal || '';
+    });
+}
+
+window.addCategory = async function () {
+    const name = prompt('ชื่อหมวดหมู่:');
+    if (!name) return;
+    const icon = prompt('ไอคอน (emoji):', '📁') || '📁';
+    const colors = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    try {
+        await api('/categories', { method: 'POST', body: { name, icon, color } });
+        showToast('เพิ่มหมวดหมู่สำเร็จ!', 'success');
+        allCategories = await api('/categories');
+        populateCategoryDropdowns();
+        renderCategoryList();
+    } catch (e) { }
+};
+
+window.editCategory = async function (id) {
+    const cat = allCategories.find(c => c.id === id);
+    if (!cat) return;
+    const name = prompt('แก้ไขชื่อหมวดหมู่:', cat.name);
+    if (!name) return;
+    const icon = prompt('ไอคอน (emoji):', cat.icon) || cat.icon;
+    try {
+        await api(`/categories/${id}`, { method: 'PUT', body: { name, icon } });
+        showToast('แก้ไขสำเร็จ!', 'success');
+        allCategories = await api('/categories');
+        populateCategoryDropdowns();
+        renderCategoryList();
+    } catch (e) { }
+};
+
+window.deleteCategory = async function (id) {
+    if (!confirm('ลบหมวดหมู่นี้?')) return;
+    try {
+        await api(`/categories/${id}`, { method: 'DELETE' });
+        showToast('ลบหมวดหมู่สำเร็จ', 'success');
+        allCategories = await api('/categories');
+        populateCategoryDropdowns();
+        renderCategoryList();
+    } catch (e) { }
+};
+
+function renderCategoryList() {
+    const el = document.getElementById('category-list');
+    if (!el) return;
+    if (allCategories.length === 0) {
+        el.innerHTML = '<p style="color: var(--text-muted); text-align: center;">ยังไม่มีหมวดหมู่</p>';
+        return;
+    }
+    el.innerHTML = allCategories.map(c => `
+        <div class="category-item" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:var(--card-bg);margin-bottom:6px;">
+            <span style="display:flex;align-items:center;gap:8px;">
+                <span style="background:${c.color}22;color:${c.color};padding:4px 10px;border-radius:8px;font-size:0.85rem;border:1px solid ${c.color}44;">${c.icon} ${escapeHtml(c.name)}</span>
+            </span>
+            <span style="display:flex;gap:4px;">
+                <button class="btn btn-sm" onclick="editCategory('${c.id}')" title="แก้ไข">✏️</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteCategory('${c.id}')" title="ลบ">🗑</button>
+            </span>
+        </div>
+    `).join('');
+}
+window.renderCategoryList = renderCategoryList;
+
+window.filterByCategory = function () {
+    loadDashboard();
+};
+
+window.changeProjectCategory = async function () {
+    if (!currentProject) return;
+    const category = document.getElementById('project-category')?.value || '';
+    try {
+        await api(`/projects/${currentProject.id}`, { method: 'PUT', body: { category } });
+        currentProject.category = category;
+        showToast('อัปเดตหมวดหมู่สำเร็จ', 'success');
+    } catch (e) {
+        showToast('อัปเดตหมวดหมู่ล้มเหลว', 'error');
+    }
+};
+
+// --- Bulk Create ---
+window.generateBulkTopics = async function () {
+    const catId = document.getElementById('bulk-category')?.value;
+    const count = document.getElementById('bulk-count')?.value || '5';
+    const platform = document.getElementById('bulk-platform')?.value || 'youtube_shorts';
+    const language = document.getElementById('bulk-language')?.value || 'th';
+
+    if (!catId) {
+        showToast('กรุณาเลือกหมวดหมู่', 'warning');
+        return;
+    }
+
+    const cat = allCategories.find(c => c.id === catId);
+    const categoryName = cat ? cat.name : 'ทั่วไป';
+
+    const btn = document.getElementById('btn-bulk-generate');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> AI กำลังคิดหัวข้อ...';
+
+    try {
+        const result = await api('/ai/generate-topics', {
+            method: 'POST',
+            body: { category: categoryName, count: parseInt(count), platform, language }
+        });
+
+        const topics = result.topics || [];
+        if (topics.length === 0) {
+            showToast('AI ไม่สามารถสร้างหัวข้อได้', 'error');
+            return;
+        }
+
+        const listEl = document.getElementById('bulk-topics-list');
+        listEl.innerHTML = `
+            <div style="border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(124,92,252,0.08);border-bottom:1px solid var(--border-color);">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:var(--accent-secondary);margin:0;">
+                        <input type="checkbox" id="bulk-select-all" checked onchange="toggleBulkAll()" style="width:18px;height:18px;cursor:pointer;">
+                        เลือกทั้งหมด (${topics.length} หัวข้อ)
+                    </label>
+                    <span style="color:var(--text-muted);font-size:0.8rem;">✏️ คลิกเพื่อแก้ไขชื่อ/คำอธิบายได้</span>
+                </div>
+                <div id="bulk-items">
+                    ${topics.map((t, i) => `
+                        <div class="bulk-topic-item" style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border-color);">
+                            <input type="checkbox" class="bulk-check" data-idx="${i}" checked style="width:18px;height:18px;cursor:pointer;margin-top:4px;flex-shrink:0;">
+                            <div style="flex:1;">
+                                <input type="text" class="bulk-name" data-idx="${i}" value="${escapeHtml(t.name)}" style="width:100%;background:transparent;border:none;color:var(--text-primary);font-weight:600;font-size:0.95rem;padding:2px 0;font-family:var(--font-sans);">
+                                <input type="text" class="bulk-desc" data-idx="${i}" value="${escapeHtml(t.description)}" style="width:100%;background:transparent;border:none;color:var(--text-secondary);font-size:0.85rem;padding:2px 0;font-family:var(--font-sans);">
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div style="margin-top:16px;display:flex;gap:12px;">
+                <button class="btn btn-primary btn-lg btn-glow" onclick="bulkCreateProjects()">
+                    🚀 สร้างโปรเจคที่เลือก
+                </button>
+                <button class="btn btn-ghost" onclick="document.getElementById('bulk-topics-list').innerHTML='';">
+                    ✕ ยกเลิก
+                </button>
+            </div>
+        `;
+    } catch (e) {
+        showToast('สร้างหัวข้อล้มเหลว', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🤖 ให้ AI คิดหัวข้อ';
+    }
+};
+
+window.toggleBulkAll = function () {
+    const selectAll = document.getElementById('bulk-select-all')?.checked;
+    document.querySelectorAll('.bulk-check').forEach(cb => cb.checked = selectAll);
+};
+
+window.bulkCreateProjects = async function () {
+    const checks = document.querySelectorAll('.bulk-check:checked');
+    if (checks.length === 0) {
+        showToast('กรุณาเลือกอย่างน้อย 1 หัวข้อ', 'warning');
+        return;
+    }
+
+    const catId = document.getElementById('bulk-category')?.value || '';
+    const platform = document.getElementById('bulk-platform')?.value || 'youtube_shorts';
+    const language = document.getElementById('bulk-language')?.value || 'th';
+
+    const items = [];
+    checks.forEach(cb => {
+        const idx = cb.dataset.idx;
+        const name = document.querySelector(`.bulk-name[data-idx="${idx}"]`)?.value || '';
+        const desc = document.querySelector(`.bulk-desc[data-idx="${idx}"]`)?.value || '';
+        if (name) items.push({ name, description: desc });
+    });
+
+    showToast(`กำลังสร้าง ${items.length} โปรเจค...`, 'info');
+
+    let success = 0;
+    for (const item of items) {
+        try {
+            await api('/projects', {
+                method: 'POST',
+                body: { name: item.name, description: item.description, platform, language, category: catId }
+            });
+            success++;
+        } catch (e) { }
+    }
+
+    showToast(`สร้างสำเร็จ ${success}/${items.length} โปรเจค! 🎉`, 'success');
+    document.getElementById('bulk-topics-list').innerHTML = '';
+    navigateTo('dashboard');
+};

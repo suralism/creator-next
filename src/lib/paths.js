@@ -7,10 +7,11 @@ export const AUDIO_DIR = path.join(DATA_DIR, 'audio');
 export const IMAGES_DIR = path.join(DATA_DIR, 'images');
 export const VIDEOS_DIR = path.join(DATA_DIR, 'videos');
 export const EXPORTS_DIR = path.join(DATA_DIR, 'exports');
+export const BGM_DIR = path.join(DATA_DIR, 'bgm');
 
 // Ensure data directories exist
 const dataDirs = [
-    'data/projects', 'data/audio', 'data/images', 'data/videos', 'data/exports'
+    'data/projects', 'data/audio', 'data/images', 'data/videos', 'data/exports', 'data/bgm'
 ];
 
 dataDirs.forEach(dir => {

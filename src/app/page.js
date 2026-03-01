@@ -11,7 +11,7 @@ export default function Home() {
 
         // Dynamically load client logic after DOM is ready
         const script = document.createElement('script');
-        script.src = '/client-logic.js';
+        script.src = `/client-logic.js?v=${Date.now()}`;
         script.async = true;
         document.body.appendChild(script);
     }, []);
@@ -118,7 +118,12 @@ function DashboardPage() {
             </div>
 
             <div className="section">
-                <h2>โปรเจคล่าสุด</h2>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <h2 style={{ margin: 0 }}>โปรเจคล่าสุด</h2>
+                    <select id="filter-category" onChange={() => filterByCategory()} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text)', fontSize: '0.85rem' }}>
+                        <option value="">ทั้งหมด</option>
+                    </select>
+                </div>
                 <div id="projects-list" className="projects-table-wrapper">
                     <div className="empty-state">
                         <div className="empty-icon">🎪</div>
@@ -173,6 +178,13 @@ function CreatePage() {
                                 <option value="en">🇺🇸 English</option>
                             </select>
                         </div>
+
+                        <div className="form-group">
+                            <label htmlFor="input-category">หมวดหมู่</label>
+                            <select id="input-category">
+                                <option value="">— ไม่ระบุ —</option>
+                            </select>
+                        </div>
                     </div>
 
                     <button type="button" className="btn btn-primary btn-lg btn-glow" onClick={() => createProject()} id="btn-create">
@@ -180,6 +192,57 @@ function CreatePage() {
                     </button>
                 </div>
             </form>
+
+            {/* Bulk Create Section */}
+            <div style={{ marginTop: '32px' }}>
+                <div className="form-card">
+                    <h2 style={{ marginBottom: '8px' }}>⚡ สร้างพร้อมกันหลายโปรเจค (Bulk Create)</h2>
+                    <p className="subtitle" style={{ marginBottom: '24px' }}>ให้ AI คิดหัวข้อตามหมวดหมู่แล้วสร้างโปรเจคทีเดียวหลายอัน</p>
+
+                    <div className="form-row">
+                        <div className="form-group">
+                            <label htmlFor="bulk-category">หมวดหมู่</label>
+                            <select id="bulk-category">
+                                <option value="">— เลือกหมวดหมู่ —</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="bulk-count">จำนวนหัวข้อ</label>
+                            <select id="bulk-count" defaultValue="5">
+                                <option value="3">3 หัวข้อ</option>
+                                <option value="5">5 หัวข้อ</option>
+                                <option value="10">10 หัวข้อ</option>
+                                <option value="15">15 หัวข้อ</option>
+                                <option value="20">20 หัวข้อ</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="form-row">
+                        <div className="form-group">
+                            <label htmlFor="bulk-platform">แพลตฟอร์ม</label>
+                            <select id="bulk-platform">
+                                <option value="youtube_shorts">📱 YouTube Shorts</option>
+                                <option value="podcast">🎙️ Podcast</option>
+                                <option value="tiktok">🎵 TikTok</option>
+                                <option value="reels">📸 Instagram Reels</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="bulk-language">ภาษา</label>
+                            <select id="bulk-language">
+                                <option value="th">🇹🇭 ไทย</option>
+                                <option value="en">🇺🇸 English</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="button" className="btn btn-secondary btn-lg" onClick={() => window.generateBulkTopics()} id="btn-bulk-generate">
+                        🤖 ให้ AI คิดหัวข้อ
+                    </button>
+
+                    <div id="bulk-topics-list" style={{ marginTop: '20px' }}></div>
+                </div>
+            </div>
         </div>
     );
 }
@@ -190,7 +253,12 @@ function ProjectPage() {
             <div className="page-header">
                 <div>
                     <h1 id="project-title">โปรเจค</h1>
-                    <p className="subtitle" id="project-subtitle">กำลังโหลด...</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <p className="subtitle" id="project-subtitle" style={{ margin: 0 }}>กำลังโหลด...</p>
+                        <select id="project-category" onChange={() => changeProjectCategory()} style={{ padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text)', fontSize: '0.8rem' }}>
+                            <option value="">ไม่ระบุหมวดหมู่</option>
+                        </select>
+                    </div>
                 </div>
                 <button className="btn btn-ghost" onClick={() => navigateTo('dashboard')}>← กลับ</button>
             </div>
@@ -571,11 +639,15 @@ function VideoStep() {
                             </select>
                         </div>
                         <div className="form-group">
-                            <label htmlFor="sub-size">ขนาดตัวอักษร</label>
-                            <select id="sub-size" defaultValue="medium">
-                                <option value="small">เล็ก (Small)</option>
-                                <option value="medium">กลาง (Medium) - แนะนำ</option>
-                                <option value="large">ใหญ่ (Large)</option>
+                            <label htmlFor="sub-size">ขนาดตัวอักษร (px)</label>
+                            <select id="sub-size" defaultValue="48">
+                                <option value="36">36px — เล็ก</option>
+                                <option value="42">42px</option>
+                                <option value="48">48px — แนะนำ</option>
+                                <option value="56">56px</option>
+                                <option value="64">64px — ใหญ่</option>
+                                <option value="72">72px</option>
+                                <option value="80">80px — ใหญ่มาก</option>
                             </select>
                         </div>
                         <div className="form-group">
@@ -601,6 +673,26 @@ function VideoStep() {
                                 <option value="center">⏺️ ส่วนกลาง</option>
                                 <option value="bottom">⬇️ ส่วนล่าง</option>
                             </select>
+                        </div>
+                    </div>
+                </div>
+
+                {/* BGM Settings */}
+                <div className="form-card" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                    <h3 style={{ marginBottom: '12px' }}>🎵 เพลงประกอบ (BGM)</h3>
+                    <div className="form-row">
+                        <div className="form-group">
+                            <label htmlFor="video-bgm">เลือก BGM</label>
+                            <select id="video-bgm" defaultValue="">
+                                <option value="">ไม่ใส่ BGM</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="bgm-volume">ระดับเสียง BGM</label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <input type="range" id="bgm-volume" min="5" max="100" defaultValue="20" style={{ flex: 1 }} onChange={() => { document.getElementById('bgm-volume-label').textContent = document.getElementById('bgm-volume').value + '%'; }} />
+                                <span id="bgm-volume-label" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', minWidth: '35px' }}>20%</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -821,6 +913,41 @@ function SettingsPage() {
                 <div>
                     <h1>⚙️ ตั้งค่า</h1>
                     <p className="subtitle">จัดการ API Key และการตั้งค่าระบบ</p>
+                </div>
+            </div>
+            <div className="settings-section" style={{ marginBottom: '24px' }}>
+                <div className="form-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                        <h2 style={{ margin: 0 }}>📂 หมวดหมู่โปรเจค</h2>
+                        <button className="btn btn-primary btn-sm" onClick={() => window.addCategory()}>+ เพิ่มหมวดหมู่</button>
+                    </div>
+                    <div id="category-list">
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="settings-section" style={{ marginBottom: '24px' }}>
+                <div className="form-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                        <h2 style={{ margin: 0 }}>🎵 เพลงประกอบ (BGM)</h2>
+                    </div>
+                    <p className="subtitle" style={{ marginBottom: '16px' }}>อัปโหลดไฟล์เพลงเพื่อใช้เป็น Background Music ในคลิป (รองรับ .mp3, .wav, .ogg, .m4a)</p>
+                    <div className="form-row" style={{ marginBottom: '12px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label htmlFor="bgm-label">ชื่อเพลง</label>
+                            <input type="text" id="bgm-label" placeholder="เช่น เพลงสบาย ๆ, เปียโนเบา ๆ" />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label htmlFor="bgm-file">เลือกไฟล์</label>
+                            <input type="file" id="bgm-file" accept=".mp3,.wav,.ogg,.m4a,.aac,.flac" style={{ padding: '8px' }} />
+                        </div>
+                    </div>
+                    <button className="btn btn-primary btn-sm" onClick={() => window.uploadBgm()} id="btn-upload-bgm">📤 อัปโหลด BGM</button>
+
+                    <div id="bgm-list" style={{ marginTop: '20px' }}>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>กำลังโหลด...</p>
+                    </div>
                 </div>
             </div>
 

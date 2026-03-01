@@ -104,7 +104,7 @@ function createSrtFile(text, totalDuration, outputPath) {
 
 export async function POST(request) {
     try {
-        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, scriptText } = await request.json();
+        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, scriptText, bgmFile, bgmVolume } = await request.json();
 
         if (!audioFile || !imageFiles || imageFiles.length === 0) {
             return NextResponse.json({ error: 'ต้องมีไฟล์เสียงและรูปภาพ' }, { status: 400 });
@@ -254,14 +254,8 @@ Your SRT Output:`;
             const srtFile = srtRelativePath;
             const isPortrait = height > width;
 
-            // 1. Process Font Size (portrait base=1080w, landscape base=1080h)
-            const sizeMap = {
-                small: isPortrait ? 0.013 : 0.018,
-                medium: isPortrait ? 0.018 : 0.025,
-                large: isPortrait ? 0.025 : 0.035
-            };
-            const sizeMult = (subtitleStyle && subtitleStyle.size) ? sizeMap[subtitleStyle.size] : sizeMap.medium;
-            const fontSize = Math.floor((isPortrait ? width : height) * sizeMult);
+            // 1. Process Font Size — use exact pixel value from client
+            const fontSize = (subtitleStyle && subtitleStyle.size) ? parseInt(subtitleStyle.size) || 48 : 48;
 
             // 2. Process Colors
             let primaryColor = '&H00FFFFFF'; // White
@@ -282,18 +276,11 @@ Your SRT Output:`;
                 outline = '3';
             }
 
-            // 4. Process Font Family — use Bold variant font files directly
-            //    (Synthetic Bold=1 in ASS causes Thai vowel/tonemark overlap)
-            const fontMap = {
-                'Kanit': 'Kanit Bold',
-                'Prompt': 'Prompt Bold',
-                'Sarabun': 'Sarabun Bold'
-            };
+            // 4. Process Font
             const selectedFont = (subtitleStyle && subtitleStyle.font) ? subtitleStyle.font : 'Kanit';
-            const fontFamily = fontMap[selectedFont] || 'Kanit Bold';
 
             // 5. Process Position (ASS Alignment: 2=bottom-center, 5=mid-center, 8=top-center)
-            let alignment = '2'; // bottom center (default)
+            let alignment = '2';
             let marginV = isPortrait ? 100 : 50;
 
             if (subtitleStyle && subtitleStyle.pos === 'top') {
@@ -304,7 +291,56 @@ Your SRT Output:`;
                 marginV = 0;
             }
 
-            subtitleFilter = `,subtitles='${srtFile}':fontsdir='${fontsDir}':force_style='Fontname=${fontFamily},FontSize=${fontSize},Alignment=${alignment},PrimaryColour=${primaryColor},OutlineColour=${outlineColor},BackColour=&H00000000,BorderStyle=1,Outline=${outline},Shadow=0,MarginV=${marginV},WrapStyle=1'`;
+            // 6. Generate proper ASS file from SRT for perfect Thai font rendering
+            const srtContent = fs.readFileSync(srtPath, 'utf8');
+            const assPath = srtPath.replace('.srt', '.ass');
+            const assRelativePath = srtRelativePath.replace('.srt', '.ass');
+
+            // Build ASS content with explicit \n (UNIX line endings required by libass)
+            const assLines = [
+                '[Script Info]',
+                'ScriptType: v4.00+',
+                `PlayResX: ${width}`,
+                `PlayResY: ${height}`,
+                'WrapStyle: 1',
+                '',
+                '[V4+ Styles]',
+                'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+                `Style: Default,${selectedFont},${fontSize},${primaryColor},&H000000FF,${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,${outline},0,${alignment},10,10,${marginV},1`,
+                '',
+                '[Events]',
+                'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+            ];
+
+            // Parse SRT blocks into ASS Dialogue lines
+            const srtBlocks = srtContent.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+            for (const block of srtBlocks) {
+                if (!block.trim()) continue;
+                const lines = block.split('\n').map(l => l.trim()).filter(l => l !== '');
+                const timeIdx = lines.findIndex(l => l.includes('-->'));
+                if (timeIdx === -1) continue;
+
+                const timeParts = lines[timeIdx].split('-->');
+                // Convert SRT time HH:MM:SS,mmm to ASS time H:MM:SS.cc
+                const toAss = (t) => {
+                    const m = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+                    if (!m) return '0:00:00.00';
+                    const cs = Math.round(parseInt(m[4]) / 10); // round for better accuracy
+                    return `${parseInt(m[1])}:${m[2]}:${m[3]}.${Math.min(cs, 99).toString().padStart(2, '0')}`;
+                };
+
+                const start = toAss(timeParts[0]);
+                const end = toAss(timeParts[1]);
+                const text = lines.slice(timeIdx + 1).join('\\N');
+
+                assLines.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`);
+            }
+
+            // Write with UNIX line endings (\n only)
+            fs.writeFileSync(assPath, assLines.join('\n') + '\n');
+            console.log(`ASS file generated: ${assPath} (${assLines.length} lines, ${srtBlocks.length} blocks)`);
+
+            subtitleFilter = `,ass='${assRelativePath}':fontsdir='${fontsDir}'`;
         }
 
         if (animationType === 'none') {
@@ -361,13 +397,28 @@ Your SRT Output:`;
             const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
             fs.writeFileSync(concatFile, concatContent);
 
-            ffmpegCmd = [
+            let ffmpegArgs = [
                 'ffmpeg -y',
                 `-f concat -safe 0 -i "${concatFile}"`,
-                `-i "${audioPath}"`,
+                `-i "${audioPath}"`
+            ];
+
+            let audioMapping = `-c:a aac -b:a 192k`;
+
+            if (bgmFile) {
+                const bgmPath = path.join(ROOT_DIR, 'data', 'bgm', bgmFile);
+                if (fs.existsSync(bgmPath)) {
+                    ffmpegArgs.push(`-stream_loop -1 -i "${bgmPath}"`);
+                    const vol = bgmVolume !== undefined ? bgmVolume : 0.2;
+                    audioMapping = `-filter_complex "[2:a]volume=${vol}[bgm];[1:a][bgm]amix=inputs=2:duration=first[aout]" -map 0:v -map "[aout]" -c:a aac -b:a 192k`;
+                }
+            }
+
+            ffmpegCmd = [
+                ...ffmpegArgs,
                 `-vf "format=yuv420p${subtitleFilter}"`,
                 `-c:v libx264 -preset medium -crf 23`,
-                `-c:a aac -b:a 192k`,
+                audioMapping,
                 `-shortest`,
                 `-movflags +faststart`,
                 `"${outputPath}"`

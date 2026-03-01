@@ -37,6 +37,24 @@ async function run() {
         );`);
         console.log("Created table: settings");
 
+        // Categories table
+        await client.execute(`CREATE TABLE IF NOT EXISTS \`categories\` (
+            \`id\` text PRIMARY KEY NOT NULL,
+            \`name\` text NOT NULL,
+            \`icon\` text DEFAULT '📁',
+            \`color\` text DEFAULT '#6366f1',
+            \`createdAt\` text NOT NULL
+        );`);
+        console.log("Created table: categories");
+
+        // Add category column to projects if not exists
+        try {
+            await client.execute(`ALTER TABLE \`projects\` ADD COLUMN \`category\` text DEFAULT '';`);
+            console.log("Added column: projects.category");
+        } catch (e) {
+            console.log("Column projects.category already exists");
+        }
+
         let schema = await client.execute(`SELECT name FROM sqlite_master WHERE type='table';`);
         console.log("Tables in DB:", schema.rows);
     } catch (err) {
