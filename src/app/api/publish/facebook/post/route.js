@@ -60,7 +60,7 @@ export async function POST(request) {
         const body = Buffer.concat([header, videoBuffer, footer]);
 
         const response = await fetch(
-            `https://graph.facebook.com/v19.0/${fbPageId}/videos`,
+            `https://graph.facebook.com/v22.0/${fbPageId}/videos`,
             {
                 method: 'POST',
                 headers: {

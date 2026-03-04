@@ -15,6 +15,7 @@ export async function POST(request) {
 
         const platformGuide = {
             youtube_shorts: 'YouTube Shorts (วิดีโอสั้น 30-60 วินาที แนวตั้ง, ดึงดูดใน 3 วินาทีแรก)',
+            youtube_doc: 'YouTube Documentary (สารคดีสั้นกระชับฉับไว 3-15 นาที แนวนอน 16:9 เน้นเล่าเรื่องในเชิงสารคดี ข้อมูลเจาะลึก จังหวะฉับไว)',
             podcast: 'Podcast (เนื้อหา 3-10 นาที, เป็นบทสนทนาหรือเล่าเรื่อง)',
             tiktok: 'TikTok (วิดีโอสั้น 15-60 วินาที, เทรนด์)',
             reels: 'Instagram Reels (วิดีโอสั้น 30-90 วินาที)'
@@ -29,11 +30,28 @@ export async function POST(request) {
         };
         const genderInstruction = genderGuide[gender] || genderGuide.neutral;
 
+        // Style-specific extra instructions
+        const styleGuide = {
+            documentary: `
+🎬 สไตล์: สารคดีกระชับฉับไว (YouTube Documentary Style)
+- เขียนเหมือนบทสารคดีที่เล่าเรื่องด้วยจังหวะเร็ว กระชับ ตัดฉากไว ไม่น้ำ ไม่อ้อมค้อม
+- เปิดเรื่องด้วยข้อเท็จจริงที่น่าตกใจ คำถามชวนคิด หรือสถานการณ์ที่ดึงดูดทันที
+- ใช้ประโยคสั้น กระชับ มีพลัง ห้ามประโยคยาวเกิน 2 บรรทัด
+- ใส่ข้อมูลจริง ตัวเลขจริง สถิติ ข้อเท็จจริงที่น่าสนใจ เหมือนสารคดี Netflix หรือ Vox
+- สร้างจังหวะเหมือนวิดีโอ: แต่ละย่อหน้าเปรียบเสมือนฉากใหม่ มี "ตัดภาพ" ไปเรื่องใหม่
+- มีจุดพีคหรือ twist ในเนื้อหาที่ทำให้คนดูตื่นเต้น
+- ทุกย่อหน้าต้องมีข้อมูลใหม่ ห้ามย้ำซ้ำ ห้ามพูดวน
+- จบด้วยบทสรุปที่ทิ้งคำถามหรือข้อคิดให้คนดูไปคิดต่อ`,
+        };
+
+        const styleExtra = styleGuide[style] || '';
+        const styleText = styleExtra || `สไตล์: ${style || 'ให้ความรู้ สนุก น่าสนใจ'}`;
+
         const prompt = `คุณเป็นนักเขียนบทคอนเทนต์มืออาชีพ สร้างบทสำหรับ ${platformGuide[platform] || platform}
 
 หัวข้อ: ${topic}
 ภาษา: ${language === 'th' ? 'ไทย' : language === 'en' ? 'English' : language}
-สไตล์: ${style || 'ให้ความรู้ สนุก น่าสนใจ'}
+${styleText}
 
 🎭 เพศผู้พูด: ${genderInstruction}
 

@@ -66,7 +66,7 @@ function formatTime(seconds) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
-function createSrtFile(text, totalDuration, outputPath) {
+function createSrtFile(text, totalDuration, outputPath, isFastPace = false) {
     // 1. Remove non-spoken stage directions/emotions same as we did for TTS
     let textStr = text.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
     // 2. Normalize whitespace
@@ -74,12 +74,15 @@ function createSrtFile(text, totalDuration, outputPath) {
     const chunks = [];
     let currentChunk = '';
 
+    // Use shorter chunks for fast-paced speech (documentary style)
+    const maxChunkLen = isFastPace ? 12 : 20;
+
     // Split Thai script properly using Intl.Segmenter
     const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
     const segments = segmenter.segment(textStr);
 
     for (const { segment } of segments) {
-        if (currentChunk.length + segment.length > 20) {
+        if (currentChunk.length + segment.length > maxChunkLen) {
             chunks.push(currentChunk.trim());
             currentChunk = '';
         }
@@ -90,11 +93,13 @@ function createSrtFile(text, totalDuration, outputPath) {
     const totalChars = chunks.reduce((acc, c) => acc + c.replace(/\s/g, '').length, 0);
     let srtContent = '';
     let currentTime = 0;
+    // Small overlap so subtitle appears slightly before the word is spoken
+    const overlap = isFastPace ? 0.05 : 0;
 
     chunks.forEach((chunk, index) => {
         const chunkChars = chunk.replace(/\s/g, '').length;
         const duration = (chunkChars / totalChars) * totalDuration;
-        const startTime = formatTime(currentTime);
+        const startTime = formatTime(Math.max(0, currentTime - overlap));
         const endTime = formatTime(currentTime + duration);
         srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${chunk}\n\n`;
         currentTime += duration;
@@ -104,7 +109,7 @@ function createSrtFile(text, totalDuration, outputPath) {
 
 export async function POST(request) {
     try {
-        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, scriptText, bgmFile, bgmVolume } = await request.json();
+        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, scriptText, bgmFile, bgmVolume, ttsEmotion } = await request.json();
 
         if (!audioFile || !imageFiles || imageFiles.length === 0) {
             return NextResponse.json({ error: 'ต้องมีไฟล์เสียงและรูปภาพ' }, { status: 400 });
@@ -129,6 +134,7 @@ export async function POST(request) {
 
         const formatSettings = {
             youtube_shorts: { width: 1080, height: 1920 },
+            youtube_doc: { width: 1920, height: 1080 },
             podcast: { width: 1920, height: 1080 },
             tiktok: { width: 1080, height: 1920 },
             reels: { width: 1080, height: 1920 },
@@ -146,6 +152,10 @@ export async function POST(request) {
         let srtPath = null;
         let srtRelativePath = null;
 
+        // Detect fast-paced speech (documentary, drama, etc.)
+        const fastPaceEmotions = ['documentary', 'drama', 'surprised', 'angry'];
+        const isFastPace = fastPaceEmotions.includes(ttsEmotion);
+
         if (subtitle && scriptText) {
             srtPath = path.join(VIDEOS_DIR, `subtitles_${videoId}.srt`);
             srtRelativePath = `data/videos/subtitles_${videoId}.srt`;
@@ -154,7 +164,7 @@ export async function POST(request) {
             try {
                 const apiKey = await getActiveKey();
                 if (apiKey) {
-                    console.log('Attempting to use Gemini Flash for highly accurate SRT generation...');
+                    console.log(`Attempting Gemini SRT generation (fastPace=${isFastPace})...`);
                     const ai = new GoogleGenAI({ apiKey });
                     const audioBuffer = fs.readFileSync(audioPath);
                     const audioBase64 = audioBuffer.toString('base64');
@@ -165,16 +175,22 @@ export async function POST(request) {
                     else if (ext === '.aac') mimeType = 'audio/aac';
                     else if (ext === '.m4a') mimeType = 'audio/m4a';
 
+                    const maxChars = isFastPace ? 12 : 20;
+                    const paceNote = isFastPace
+                        ? `\nIMPORTANT: This audio has FAST-PACED speech (documentary/narrator style). The speaker talks VERY quickly.\n- You MUST create MORE subtitle entries with SHORTER text (max ${maxChars} characters each).\n- Each subtitle must appear and disappear EXACTLY when that phrase is spoken — precision is critical.\n- Subtitles must change rapidly to match the fast delivery. Do NOT group too many words together.\n- Start each subtitle slightly BEFORE the word is spoken (50ms early) so viewers can read along.`
+                        : '';
+
                     // Prompt to extract an accurate SRT
                     const prompt = `You are a professional subtitler for shorts and reels videos.
 Please listen to the attached audio file in Thai language, and generate highly accurate sync-timed subtitles in SubRip (.srt) format.
 The spoken script text inside the audio should be exactly this:
 "${scriptText}"
-
+${paceNote}
 Rules:
-1. Wrap the text nicely. Limit each subtitle line to a maximum of 20 characters, split into nice logical chunks (short fragments) perfect for fast vertical videos.
+1. Wrap the text nicely. Limit each subtitle line to a maximum of ${maxChars} characters, split into nice logical chunks (short fragments) perfect for fast vertical videos.
 2. Provide ONLY the raw SRT format. Do not use markdown blocks like \`\`\`srt. Just output the text.
 3. Timestamps MUST strictly follow the standard SRT format exactly: HH:MM:SS,MMM --> HH:MM:SS,MMM (e.g., 00:00:01,250 --> 00:00:03,450). Notice the COMMA before the 3-digit milliseconds!
+4. Listen to the audio VERY carefully. Every timestamp must match EXACTLY when that word or phrase is actually spoken in the audio. Do NOT estimate or space evenly — sync to actual speech.
 
 Your SRT Output:`;
 
@@ -241,7 +257,7 @@ Your SRT Output:`;
 
             // Fallback algorithm if Gemini failed or no API key
             if (!geminiSuccess) {
-                createSrtFile(scriptText, audioDuration, srtPath);
+                createSrtFile(scriptText, audioDuration, srtPath, isFastPace);
             }
         }
 

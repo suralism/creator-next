@@ -9,6 +9,16 @@ export default function Home() {
         if (initialized.current) return;
         initialized.current = true;
 
+        window.addEventListener('error', (e) => {
+            const el = document.getElementById('api-status');
+            if (el) el.innerHTML = `<span style="color:red">ERROR: ${e.message}</span>`;
+            else alert(e.message);
+        });
+        window.addEventListener('unhandledrejection', (e) => {
+            const el = document.getElementById('api-status');
+            if (el) el.innerHTML = `<span style="color:red">PROMISE REJECTED: ${e.reason?.message || e.reason}</span>`;
+        });
+
         // Dynamically load client logic after DOM is ready
         const script = document.createElement('script');
         script.src = `/client-logic.js?v=${Date.now()}`;
@@ -25,6 +35,7 @@ export default function Home() {
                 <main id="main-content" className="main-content">
                     <DashboardPage />
                     <CreatePage />
+                    <AutopilotPage />
                     <ProjectPage />
                     <SettingsPage />
                 </main>
@@ -56,6 +67,10 @@ function Sidebar() {
                 <button className="nav-item" data-page="project" id="nav-project" style={{ display: 'none' }} onClick={() => navigateTo('project')}>
                     <span className="nav-icon">📋</span>
                     <span>โปรเจค</span>
+                </button>
+                <button className="nav-item" data-page="autopilot" id="nav-autopilot" onClick={() => navigateTo('autopilot')}>
+                    <span className="nav-icon">🚀</span>
+                    <span>ออโต้ไพลอต</span>
                 </button>
                 <div style={{ flex: 1 }}></div>
                 <button className="nav-item" data-page="settings" id="nav-settings" onClick={() => navigateTo('settings')}>
@@ -132,6 +147,7 @@ function DashboardPage() {
                         <button className="btn btn-primary" onClick={() => navigateTo('create')}>สร้างเลย</button>
                     </div>
                 </div>
+                <div id="dashboard-pagination" className="pagination-wrapper"></div>
             </div>
         </div>
     );
@@ -341,7 +357,7 @@ function ScriptStep() {
                     </div>
                     <div className="form-group">
                         <label htmlFor="input-duration">ความยาวบท</label>
-                        <select id="input-duration" defaultValue="1 นาที (ประมาณ 150-200 คำ)">
+                        <select id="input-duration" defaultValue="2 นาที (ประมาณ 300-400 คำ)">
                             <option value="30 วินาที (ประมาณ 80-100 คำ)">30 วินาที</option>
                             <option value="1 นาที (ประมาณ 150-200 คำ)">1 นาที</option>
                             <option value="2 นาที (ประมาณ 300-400 คำ)">2 นาที</option>
@@ -356,7 +372,7 @@ function ScriptStep() {
                 <div className="form-row">
                     <div className="form-group">
                         <label htmlFor="input-gender">🎭 เพศผู้พูด</label>
-                        <select id="input-gender">
+                        <select id="input-gender" defaultValue="neutral">
                             <option value="male">👨 ชาย (ครับ/ผม)</option>
                             <option value="female">👩 หญิง (ค่ะ/ดิฉัน)</option>
                             <option value="neutral">⚪ ไม่ระบุเพศ</option>
@@ -640,7 +656,7 @@ function VideoStep() {
                         </div>
                         <div className="form-group">
                             <label htmlFor="sub-size">ขนาดตัวอักษร (px)</label>
-                            <select id="sub-size" defaultValue="48">
+                            <select id="sub-size" defaultValue="80">
                                 <option value="36">36px — เล็ก</option>
                                 <option value="42">42px</option>
                                 <option value="48">48px — แนะนำ</option>
@@ -652,7 +668,7 @@ function VideoStep() {
                         </div>
                         <div className="form-group">
                             <label htmlFor="sub-color">โทนสี</label>
-                            <select id="sub-color" defaultValue="white_black">
+                            <select id="sub-color" defaultValue="yellow_black">
                                 <option value="white_black">⚪ ขาว / ขอบดำ</option>
                                 <option value="yellow_black">⭐ เหลือง / ขอบดำ</option>
                                 <option value="black_white">⚫ ดำ / ขอบขาว</option>
@@ -668,7 +684,7 @@ function VideoStep() {
                         </div>
                         <div className="form-group">
                             <label htmlFor="sub-pos">ตำแหน่ง</label>
-                            <select id="sub-pos" defaultValue="bottom">
+                            <select id="sub-pos" defaultValue="top">
                                 <option value="top">⬆️ ส่วนบน</option>
                                 <option value="center">⏺️ ส่วนกลาง</option>
                                 <option value="bottom">⬇️ ส่วนล่าง</option>
@@ -1079,6 +1095,175 @@ function SettingsPage() {
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function AutopilotPage() {
+    return (
+        <div id="page-autopilot" className="page">
+            <div className="page-header">
+                <div>
+                    <h1>🚀 ระบบ Autopilot (Smart Generator)</h1>
+                    <p className="subtitle">กำหนดแคตตาล็อก (หัวข้อหลัก) แล้วให้ระบบสร้างวิดีโอหลายเรื่องให้รวดเดียวตั้งแต่ต้นจนจบ</p>
+                </div>
+            </div>
+
+            <div className="form-card">
+                <div className="form-group">
+                    <label htmlFor="ap-catalog">หัวข้อแคตตาล็อก (Catalog / Topic)</label>
+                    <input type="text" id="ap-catalog" placeholder="เช่น 10 อันดับสัตว์โลกน่ารัก, ประวัติศาสตร์ไทย, ความรู้รอบตัว" required />
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group">
+                        <label htmlFor="ap-count">จำนวนเรื่องที่ต้องการสร้าง</label>
+                        <select id="ap-count" defaultValue="3">
+                            <option value="1">1 เรื่อง</option>
+                            <option value="3">3 เรื่อง</option>
+                            <option value="5">5 เรื่อง</option>
+                            <option value="10">10 เรื่อง</option>
+                        </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ap-platform">แพลตฟอร์ม & รูปแบบวิดีโอ</label>
+                        <select id="ap-platform" defaultValue="youtube_shorts">
+                            <option value="youtube_shorts">📱 YouTube Shorts (9:16)</option>
+                            <option value="youtube_doc">🎬 YouTube Documentary (16:9)</option>
+                            <option value="tiktok">🎵 TikTok (9:16)</option>
+                            <option value="reels">📸 Instagram Reels (9:16)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group">
+                        <label htmlFor="ap-duration">ความยาวคลิป (โดยประมาณ)</label>
+                        <select id="ap-duration" defaultValue="2 นาที (ประมาณ 300-400 คำ)">
+                            <option value="30 วินาที (ประมาณ 80-100 คำ)">30 วินาที</option>
+                            <option value="1 นาที (ประมาณ 150-200 คำ)">1 นาที</option>
+                            <option value="2 นาที (ประมาณ 300-400 คำ)">2 นาที</option>
+                            <option value="3 นาที (ประมาณ 450-600 คำ)">3 นาที</option>
+                            <option value="5 นาที (ประมาณ 750-1000 คำ)">5 นาที</option>
+                        </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ap-voice">รูปแบบเสียง (Voice)</label>
+                        <select id="ap-voice" defaultValue="Kore">
+                            <option value="Kore">Kore (หญิง)</option>
+                            <option value="Zephyr">Zephyr (หญิง)</option>
+                            <option value="Aoede">Aoede (หญิง)</option>
+                            <option value="Leda">Leda (หญิง)</option>
+                            <option value="Puck">Puck (ชาย)</option>
+                            <option value="Charon">Charon (ชาย)</option>
+                            <option value="Fenrir">Fenrir (ชาย)</option>
+                            <option value="Orus">Orus (ชาย)</option>
+                            <option value="Achernar">Achernar</option>
+                            <option value="Achird">Achird</option>
+                            <option value="Algenib">Algenib</option>
+                            <option value="Algieba">Algieba</option>
+                            <option value="Alnilam">Alnilam</option>
+                            <option value="Autonoe">Autonoe</option>
+                            <option value="Callirrhoe">Callirrhoe</option>
+                            <option value="Despina">Despina</option>
+                            <option value="Enceladus">Enceladus</option>
+                            <option value="Erinome">Erinome</option>
+                            <option value="Gacrux">Gacrux</option>
+                            <option value="Iapetus">Iapetus</option>
+                            <option value="Laomedeia">Laomedeia</option>
+                            <option value="Pulcherrima">Pulcherrima</option>
+                            <option value="Rasalgethi">Rasalgethi</option>
+                            <option value="Sadachbia">Sadachbia</option>
+                            <option value="Sadaltager">Sadaltager</option>
+                            <option value="Schedar">Schedar</option>
+                            <option value="Sulafat">Sulafat</option>
+                            <option value="Umbriel">Umbriel</option>
+                            <option value="Vindemiatrix">Vindemiatrix</option>
+                            <option value="Zubenelgenubi">Zubenelgenubi</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group">
+                        <label htmlFor="ap-image-style">รูปแบบภาพประกอบ</label>
+                        <select id="ap-image-style" defaultValue="digital art, vibrant colors">
+                            <option value="digital art, vibrant colors">🎨 Digital Art</option>
+                            <option value="highly detailed realistic photography, 8k, cinematic lighting">📷 Realistic</option>
+                            <option value="anime style, studio ghibli, beautiful scenery">🌸 Anime</option>
+                            <option value="3d pixar disney style, cute and expressive">🧸 3D Pixar</option>
+                            <option value="cyberpunk sci-fi style, neon lights, highly detailed">🌃 Cyberpunk</option>
+                            <option value="dark fantasy, moody lighting, highly detailed">🌑 Dark Fantasy</option>
+                        </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ap-subtitle">ตั้งค่าซับไตเติ้ล</label>
+                        <select id="ap-subtitle" defaultValue="yes">
+                            <option value="yes">✅ ใส่ซับอัตโนมัติ (เปิด)</option>
+                            <option value="no">❌ ไม่ใส่ซับไตเติ้ล</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group">
+                        <label htmlFor="ap-language">ภาษา</label>
+                        <select id="ap-language" defaultValue="th">
+                            <option value="th">🇹🇭 ไทย</option>
+                            <option value="en">🇺🇸 English</option>
+                        </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ap-category">หมวดหมู่</label>
+                        <select id="ap-category">
+                            <option value="">— ไม่ระบุ —</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group" style={{ flex: 1 }}>
+                        <label htmlFor="ap-delay">⏱️ เวลาพักระหว่างคลิป (ลด Rate Limit)</label>
+                        <select id="ap-delay" defaultValue="120">
+                            <option value="0">ไม่ต้องพัก (เสร็จปุ๊บรันต่อเลย)</option>
+                            <option value="60">พัก 1 นาที</option>
+                            <option value="120">พัก 2 นาที (แนะนำ)</option>
+                            <option value="300">พัก 5 นาที</option>
+                            <option value="600">พัก 10 นาที</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="form-row">
+                    <div className="form-group">
+                        <label htmlFor="ap-bgm">🎵 เพลงประกอบ (BGM)</label>
+                        <select id="ap-bgm" defaultValue="">
+                            <option value="">ไม่ใส่ BGM</option>
+                        </select>
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ap-bgm-volume">ระดับเสียง BGM</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input type="range" id="ap-bgm-volume" min="5" max="100" defaultValue="20" style={{ flex: 1 }} onChange={() => { document.getElementById('ap-bgm-volume-label').textContent = document.getElementById('ap-bgm-volume').value + '%'; }} />
+                            <span id="ap-bgm-volume-label" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', minWidth: '35px' }}>20%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" className="btn btn-primary btn-lg btn-glow" onClick={() => { if (window.startSmartAutopilot) window.startSmartAutopilot(); }} id="btn-start-autopilot" style={{ width: '100%', marginTop: '16px' }}>
+                    🚀 เริ่มรันระบบ Autopilot
+                </button>
+            </div>
+
+            <div id="ap-progress-section" style={{ display: 'none', marginTop: '32px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0 }}>สถานะการทำงาน</h3>
+                    <button className="btn btn-sm btn-danger" id="btn-stop-autopilot" onClick={() => { if (window.stopSmartAutopilot) window.stopSmartAutopilot(); }} style={{ display: 'none' }}>⏹️ หยุด</button>
+                </div>
+                <div id="ap-log-container" style={{ background: 'var(--bg-card)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', height: '400px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    <div style={{ color: 'var(--text-muted)' }}>รอเริ่มทำงาน...</div>
                 </div>
             </div>
         </div>

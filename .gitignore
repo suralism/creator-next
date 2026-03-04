@@ -44,3 +44,6 @@ Thumbs.db
 
 # Generated data (audio, video, images, fonts)
 data/
+
+# Electron app builds
+dist-electron/

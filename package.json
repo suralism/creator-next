@@ -3,14 +3,41 @@
     "version": "2.0.0",
     "description": "Content Creator Studio - AI-powered content creation tool (Next.js)",
     "private": true,
+    "main": "electron-main.js",
     "scripts": {
         "dev": "next dev -p 3000",
         "build": "next build",
-        "start": "next start -p 3000"
+        "start": "next start -p 3000",
+        "dev:next": "cross-env BROWSER=none next dev -p 3000",
+        "dev:electron": "wait-on http://127.0.0.1:3000 && electron .",
+        "electron:dev": "concurrently -k \"npm run dev:next\" \"npm run dev:electron\"",
+        "electron:build": "next build && node scripts/prepare-electron.js && node scripts/fix-winsign-cache.js && electron-builder"
+    },
+    "build": {
+        "appId": "com.creatorstudio.app",
+        "productName": "Creator Studio",
+        "directories": {
+            "output": "dist-electron"
+        },
+        "files": [
+            ".next/standalone/**/*",
+            "electron-main.js"
+        ],
+        "asarUnpack": [
+            ".next/standalone/**/*"
+        ],
+        "win": {
+            "target": "nsis",
+            "icon": "public/favicon.ico",
+            "verifyUpdateCodeSignature": false,
+            "signAndEditExecutable": false,
+            "forceCodeSigning": false
+        }
     },
     "dependencies": {
         "@google/genai": "^1.43.0",
         "@libsql/client": "^0.17.0",
+        "7zip-bin-win": "^2.2.0",
         "cors": "^2.8.5",
         "dotenv": "^16.6.1",
         "drizzle-orm": "^0.45.1",
@@ -22,7 +49,12 @@
         "uuid": "^9.0.1"
     },
     "devDependencies": {
+        "concurrently": "^9.2.1",
+        "cross-env": "^10.1.0",
         "drizzle-kit": "^0.31.9",
-        "tsx": "^4.21.0"
+        "electron": "^40.6.1",
+        "electron-builder": "^26.8.1",
+        "tsx": "^4.21.0",
+        "wait-on": "^9.0.4"
     }
 }

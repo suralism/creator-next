@@ -8,9 +8,11 @@ let currentStep = 'script';
 let generatedAudio = null;
 let generatedImages = [];
 let allCategories = [];
+let dashboardPage = 1;
+let dashboardPageSize = 10;
 
 // --- Navigation ---
-window.navigateTo = function (page, data) {
+window.navigateTo = async function (page, data) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -32,6 +34,12 @@ window.navigateTo = function (page, data) {
         loadProject(data.projectId);
     } else if (page === 'settings') {
         loadSettings();
+    } else if (page === 'autopilot') {
+        if (allCategories.length === 0) {
+            try { allCategories = await api('/categories'); } catch (e) { allCategories = []; }
+        }
+        populateCategoryDropdowns();
+        await loadBgmList();
     }
 };
 
@@ -117,10 +125,22 @@ async function loadDashboard() {
           <p>เริ่มสร้างโปรเจคแรกของคุณเลย!</p>
           <button class="btn btn-primary" onclick="navigateTo('create')">สร้างเลย</button>
         </div>`;
+            // Clear pagination
+            const paginationEl = document.getElementById('dashboard-pagination');
+            if (paginationEl) paginationEl.innerHTML = '';
             return;
         }
 
-        const tableRows = filteredProjects.map(p => {
+        // --- Pagination logic ---
+        const totalItems = filteredProjects.length;
+        const totalPages = Math.ceil(totalItems / dashboardPageSize);
+        if (dashboardPage > totalPages) dashboardPage = totalPages;
+        if (dashboardPage < 1) dashboardPage = 1;
+        const startIdx = (dashboardPage - 1) * dashboardPageSize;
+        const endIdx = Math.min(startIdx + dashboardPageSize, totalItems);
+        const paginatedProjects = filteredProjects.slice(startIdx, endIdx);
+
+        const tableRows = paginatedProjects.map(p => {
             const progress = calculateProgress(p);
             const platformLabels = {
                 youtube_shorts: '📱 Shorts',
@@ -203,6 +223,9 @@ async function loadDashboard() {
           </table>
         `;
 
+        // --- Render Pagination Controls ---
+        renderDashboardPagination(totalItems, totalPages);
+
         // Fetch engagement stats in background
         if (fbVideoIds.length > 0 || ytVideoIds.length > 0) {
             fetchEngagementStats(projects, fbVideoIds, ytVideoIds);
@@ -216,6 +239,7 @@ async function loadDashboard() {
 async function fetchEngagementStats(projects, fbVideoIds, ytVideoIds) {
     try {
         let stats = {};
+        let fbMissingPerms = null;
 
         // 1. Fetch Facebook
         if (fbVideoIds && fbVideoIds.length > 0) {
@@ -229,6 +253,9 @@ async function fetchEngagementStats(projects, fbVideoIds, ytVideoIds) {
                 });
                 if (fbResult.stats) {
                     stats = { ...stats, ...fbResult.stats };
+                }
+                if (fbResult.missingPermissions) {
+                    fbMissingPerms = fbResult.missingPermissions;
                 }
             } catch (e) { console.error('FB Stats Err:', e) }
         }
@@ -247,6 +274,29 @@ async function fetchEngagementStats(projects, fbVideoIds, ytVideoIds) {
                     stats = { ...stats, ...ytResult.stats };
                 }
             } catch (e) { console.error('YT Stats Err:', e) }
+        }
+
+        // Show permission warning if missing
+        if (fbMissingPerms && fbMissingPerms.length > 0) {
+            const permList = fbMissingPerms.map(p => `<b>${p.permission}</b> (${p.description})`).join(', ');
+            const warningEl = document.getElementById('fb-permission-warning');
+            if (warningEl) {
+                warningEl.innerHTML = `
+                    <div style="padding: 12px 16px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 12px; font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 1.2rem;">⚠️</span>
+                        <div>
+                            <strong style="color: #f59e0b;">Facebook Token ขาด Permissions</strong>
+                            <p style="margin: 4px 0 0; line-height: 1.5;">ไม่สามารถดึง Engagement ได้เพราะ Token ขาด: ${permList}</p>
+                            <p style="margin: 6px 0 0; font-size: 0.8rem; color: var(--text-muted);">
+                                กรุณาสร้าง Token ใหม่จาก <a href="https://developers.facebook.com/tools/explorer/" target="_blank" style="color: var(--accent-primary);">Graph API Explorer</a> 
+                                โดยเพิ่ม permissions ที่ขาด แล้ว
+                                <a href="#" onclick="navigateTo('settings'); return false;" style="color: var(--accent-primary);">อัปเดต Token ในหน้าตั้งค่า</a>
+                            </p>
+                        </div>
+                    </div>
+                `;
+                warningEl.style.display = 'block';
+            }
         }
 
         let totalViews = 0;
@@ -280,9 +330,13 @@ async function fetchEngagementStats(projects, fbVideoIds, ytVideoIds) {
                 `;
             } else {
                 const isRequested = [...fbVideoIds, ...ytVideoIds].some(v => v.projectId === p.id);
-                statsEl.innerHTML = isRequested ?
-                    '<span style="color: var(--text-muted); font-size: 0.75rem;">ไม่พบข้อมูล</span>' :
-                    '<span style="color: var(--text-muted); font-size: 0.8rem;">—</span>';
+                if (isRequested && fbMissingPerms && fbMissingPerms.length > 0) {
+                    statsEl.innerHTML = '<span style="color: #f59e0b; font-size: 0.75rem;" title="Token ขาด permissions">⚠️ ขาด permissions</span>';
+                } else {
+                    statsEl.innerHTML = isRequested ?
+                        '<span style="color: var(--text-muted); font-size: 0.75rem;">ไม่พบข้อมูล</span>' :
+                        '<span style="color: var(--text-muted); font-size: 0.8rem;">—</span>';
+                }
             }
         });
 
@@ -917,9 +971,10 @@ window.runAutopilot = async function () {
 
         // Step 2: Generate Audio
         const ttsVoice = document.getElementById('tts-voice')?.value || 'th-TH-Standard-A'; // Default voice
+        const ttsEmotion = document.getElementById('tts-emotion')?.value || 'neutral';
         const audioRes = await api('/tts/generate', {
             method: 'POST',
-            body: { text: scriptContent, projectId: currentProject.id, voice: ttsVoice }
+            body: { text: scriptContent, projectId: currentProject.id, voice: ttsVoice, emotion: ttsEmotion }
         });
 
         updatedSteps = {
@@ -927,6 +982,8 @@ window.runAutopilot = async function () {
             audio: {
                 status: 'done',
                 filePath: audioRes.filePath,
+                emotion: ttsEmotion,
+                voice: ttsVoice,
                 generatedAt: new Date().toISOString()
             }
         };
@@ -993,7 +1050,8 @@ window.runAutopilot = async function () {
                 animation: videoAnimation,
                 subtitle: videoSubtitle,
                 subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg },
-                scriptText: currentProject.steps.script.content
+                scriptText: currentProject.steps.script.content,
+                ttsEmotion: ttsEmotion
             }
         });
 
@@ -1183,6 +1241,8 @@ window.generateAudio = async function () {
                 status: 'done',
                 filePath: result.filePath,
                 fileName: result.fileName,
+                emotion,
+                voice,
                 generatedAt: new Date().toISOString()
             }
         };
@@ -1358,13 +1418,163 @@ window.generateImages = async function () {
 
 function showImagesResult(files) {
     const grid = document.getElementById('images-result');
+    const header = document.getElementById('images-result-header');
     grid.classList.remove('hidden');
-    grid.innerHTML = files.map((f, i) => `
-            <div class="image-card">
-                <img src="${f}" alt="Generated image ${i + 1}" loading="lazy">
-                <div class="image-overlay">รูปที่ ${i + 1}</div>
+    if (header) {
+        header.classList.remove('hidden');
+        header.style.display = 'flex';
+    }
+
+    generatedImages = [...files]; // keep in sync
+
+    grid.innerHTML = files.map((f, i) => {
+        const isVideo = /\.(mp4|mov|webm|avi)$/i.test(f);
+        const mediaEl = isVideo
+            ? `<video src="${f}" controls autoplay muted loop playsinline style="width:100%; height:100%; object-fit:cover;"></video>`
+            : `<img src="${f}" alt="Image ${i + 1}" loading="lazy">`;
+
+        return `
+            <div class="image-card" draggable="true" data-index="${i}"
+                 ondragstart="window._imgDragStart(event)" ondragover="window._imgDragOver(event)"
+                 ondrop="window._imgDrop(event)" ondragend="window._imgDragEnd(event)"
+                 style="position: relative; cursor: grab;">
+                ${mediaEl}
+                <div class="image-overlay" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px;">
+                    <span style="font-weight: 600;">${isVideo ? '🎬' : '🖼️'} ${i + 1}</span>
+                    <button onclick="window.deleteImage(${i})" class="btn btn-sm" style="background: rgba(239,68,68,0.8); color: white; padding: 2px 8px; font-size: 0.75rem; border-radius: 6px; min-width: auto;">✕</button>
+                </div>
+                <div class="drag-handle" style="position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.6); color: white; padding: 2px 6px; border-radius: 6px; font-size: 0.7rem; pointer-events: none;">⠿</div>
             </div>
-        `).join('');
+        `;
+    }).join('');
+}
+
+// --- Upload Custom Images/Videos ---
+window.uploadCustomImages = async function () {
+    const input = document.getElementById('upload-images-input');
+    if (!input.files || input.files.length === 0) return;
+    if (!currentProject) {
+        showToast('กรุณาเปิดโปรเจคก่อนอัปโหลด', 'warning');
+        return;
+    }
+
+    const preview = document.getElementById('upload-preview');
+    preview.style.display = 'block';
+    preview.innerHTML = `<span class="spinner"></span> กำลังอัปโหลด ${input.files.length} ไฟล์...`;
+
+    try {
+        const formData = new FormData();
+        formData.append('projectId', currentProject.id);
+        for (const file of input.files) {
+            formData.append('files', file);
+        }
+
+        const response = await fetch('/api/images/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            const uploadedFiles = result.results.filter(r => r.success).map(r => r.filePath);
+
+            // Add to existing images
+            generatedImages = [...generatedImages, ...uploadedFiles];
+            showImagesResult(generatedImages);
+
+            // Save to project
+            await saveImageOrder();
+
+            preview.innerHTML = `✅ อัปโหลดสำเร็จ ${result.uploaded} ไฟล์${result.failed > 0 ? `, ล้มเหลว ${result.failed} ไฟล์` : ''}`;
+            showToast(`📤 อัปโหลดสำเร็จ ${result.uploaded} ไฟล์!`, 'success');
+        } else {
+            preview.innerHTML = `❌ ${result.error}`;
+            showToast('อัปโหลดล้มเหลว', 'error');
+        }
+    } catch (err) {
+        preview.innerHTML = `❌ ${err.message}`;
+        showToast('อัปโหลดล้มเหลว: ' + err.message, 'error');
+    }
+
+    // Reset input
+    input.value = '';
+};
+
+// --- Delete Image ---
+window.deleteImage = async function (index) {
+    if (!confirm(`ลบ ${/\.(mp4|mov|webm|avi)$/i.test(generatedImages[index]) ? 'วิดีโอ' : 'รูป'}ที่ ${index + 1} หรือไม่?`)) return;
+    generatedImages.splice(index, 1);
+    showImagesResult(generatedImages);
+    await saveImageOrder();
+    showToast('ลบสำเร็จ', 'success');
+};
+
+// --- Drag & Drop Reorder ---
+let _dragIdx = null;
+
+window._imgDragStart = function (e) {
+    _dragIdx = parseInt(e.currentTarget.dataset.index);
+    e.currentTarget.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+};
+
+window._imgDragOver = function (e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const card = e.currentTarget;
+    card.style.outline = '2px solid var(--accent-primary)';
+    card.style.outlineOffset = '-2px';
+};
+
+window._imgDrop = function (e) {
+    e.preventDefault();
+    const dropIdx = parseInt(e.currentTarget.dataset.index);
+    e.currentTarget.style.outline = '';
+
+    if (_dragIdx !== null && _dragIdx !== dropIdx) {
+        // Swap items
+        const item = generatedImages.splice(_dragIdx, 1)[0];
+        generatedImages.splice(dropIdx, 0, item);
+        showImagesResult(generatedImages);
+        saveImageOrder();
+        showToast(`ย้ายจากตำแหน่ง ${_dragIdx + 1} → ${dropIdx + 1}`, 'info');
+    }
+    _dragIdx = null;
+};
+
+window._imgDragEnd = function (e) {
+    e.currentTarget.style.opacity = '1';
+    e.currentTarget.style.outline = '';
+    // Clear all outlines
+    document.querySelectorAll('#images-result .image-card').forEach(c => {
+        c.style.outline = '';
+        c.style.opacity = '1';
+    });
+};
+
+// --- Save Image Order ---
+async function saveImageOrder() {
+    if (!currentProject) return;
+    try {
+        const updatedSteps = {
+            ...currentProject.steps,
+            images: {
+                status: 'done',
+                files: generatedImages,
+                generatedAt: currentProject.steps?.images?.generatedAt || new Date().toISOString()
+            }
+        };
+
+        await api(`/projects/${currentProject.id}`, {
+            method: 'PUT',
+            body: { steps: updatedSteps }
+        });
+
+        currentProject.steps = updatedSteps;
+        updateStepStatus(currentProject);
+    } catch (err) {
+        console.error('Save image order error:', err);
+    }
 }
 
 // --- Video ---
@@ -1442,6 +1652,9 @@ window.createVideo = async function () {
     const bgmFile = document.getElementById('video-bgm')?.value || null;
     const bgmVolume = document.getElementById('bgm-volume')?.value || 20;
 
+    // Get TTS emotion to help subtitle sync for fast-paced speech
+    const ttsEmotion = currentProject.steps?.audio?.emotion || document.getElementById('tts-emotion')?.value || 'neutral';
+
     try {
         showToast('🎬 กำลังสร้างวิดีโอ... อาจใช้เวลา 1-2 นาที', 'info');
 
@@ -1457,7 +1670,8 @@ window.createVideo = async function () {
                 subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg, pos: subPos },
                 scriptText: currentProject.steps.script.content,
                 bgmFile,
-                bgmVolume: parseFloat(bgmVolume) / 100
+                bgmVolume: parseFloat(bgmVolume) / 100,
+                ttsEmotion
             }
         });
 
@@ -1523,6 +1737,7 @@ function escapeHtml(text) {
 function getPlatformLabel(platform) {
     const labels = {
         youtube_shorts: '📱 YouTube Shorts',
+        youtube_doc: '🎬 YouTube Documentary',
         podcast: '🎙️ Podcast',
         tiktok: '🎵 TikTok',
         reels: '📸 Instagram Reels'
@@ -1545,7 +1760,125 @@ async function loadSettings() {
     await loadBgmList();
     // Also load Facebook settings
     await loadFacebookSettings();
+    // Load storage info
+    await loadStorageInfo();
 }
+
+// --- Storage Management ---
+async function loadStorageInfo() {
+    const container = document.getElementById('storage-section');
+    if (!container) return;
+
+    container.innerHTML = `<div style="text-align: center; padding: 20px;"><span class="spinner"></span> กำลังวิเคราะห์พื้นที่...</div>`;
+
+    try {
+        const data = await api('/storage');
+
+        const folderRows = Object.entries(data.folders).map(([name, info]) => {
+            const icons = { images: '🖼️', audio: '🔊', videos: '🎬', exports: '📦' };
+            const pct = data.totalSize > 0 ? ((info.size / data.totalSize) * 100).toFixed(1) : 0;
+            return `
+                <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-color);">
+                    <span style="min-width: 30px;">${icons[name] || '📁'}</span>
+                    <span style="min-width: 80px; font-weight: 600;">${name}</span>
+                    <div style="flex: 1; background: var(--bg-secondary); border-radius: 8px; height: 20px; overflow: hidden;">
+                        <div style="height: 100%; width: ${pct}%; background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary)); border-radius: 8px; transition: width 0.5s;"></div>
+                    </div>
+                    <span style="min-width: 80px; text-align: right; font-weight: 500;">${info.sizeFormatted}</span>
+                    <span style="min-width: 60px; text-align: right; color: var(--text-muted);">${info.files} ไฟล์</span>
+                </div>
+            `;
+        }).join('');
+
+        const orphanedProjects = data.projects.filter(p => p.isOrphaned);
+        const activeProjects = data.projects.filter(p => !p.isOrphaned);
+
+        const projectRows = activeProjects.slice(0, 10).map(p => `
+            <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(p.name)}</span>
+                <span style="min-width: 80px; text-align: right; color: var(--text-muted);">${p.files} ไฟล์</span>
+                <span style="min-width: 80px; text-align: right; font-weight: 500;">${p.sizeFormatted}</span>
+                <button onclick="cleanupStorage('project', '${p.id}')" class="btn btn-sm" style="background: rgba(239,68,68,0.15); color: #ef4444; padding: 2px 8px; font-size: 0.75rem;">🗑️ ลบไฟล์</button>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                <div>
+                    <h3 style="margin: 0;">💾 พื้นที่จัดเก็บ</h3>
+                    <p style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.85rem;">ใช้พื้นที่ทั้งหมด <strong>${data.totalSizeFormatted}</strong> • ${data.activeProjectCount} โปรเจค</p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">${folderRows}</div>
+
+            ${data.orphanedSize > 0 ? `
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <h4 style="margin: 0; color: #ef4444;">⚠️ ไฟล์จากโปรเจคที่ลบแล้ว</h4>
+                        <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--text-muted);">
+                            พบ <strong>${data.orphanedFileCount}</strong> ไฟล์ ขนาดรวม <strong>${data.orphanedSizeFormatted}</strong> ที่เป็นของโปรเจคที่ลบไปแล้ว
+                        </p>
+                    </div>
+                    <button onclick="cleanupStorage('orphaned')" class="btn btn-sm" style="background: #ef4444; color: white; white-space: nowrap;">🧹 เคลียร์ทั้งหมด</button>
+                </div>
+            </div>
+            ` : ''}
+
+            ${data.tempFilesCount > 0 ? `
+            <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <h4 style="margin: 0; color: #f59e0b;">🧹 ไฟล์ชั่วคราว</h4>
+                        <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--text-muted);">
+                            พบ <strong>${data.tempFilesCount}</strong> ไฟล์ (subtitle, segment, replaced) ขนาดรวม <strong>${data.tempFilesSizeFormatted}</strong>
+                        </p>
+                    </div>
+                    <button onclick="cleanupStorage('temp')" class="btn btn-sm" style="background: #f59e0b; color: white; white-space: nowrap;">🧹 ลบไฟล์ temp</button>
+                </div>
+            </div>
+            ` : ''}
+
+            ${projectRows ? `
+            <div style="margin-top: 16px;">
+                <h4 style="margin: 0 0 8px;">📊 พื้นที่แยกตามโปรเจค (Top 10)</h4>
+                ${projectRows}
+            </div>
+            ` : ''}
+        `;
+    } catch (err) {
+        container.innerHTML = `<p style="color: #ef4444;">❌ โหลดข้อมูลพื้นที่ล้มเหลว: ${err.message}</p>`;
+    }
+}
+
+window.cleanupStorage = async function (action, projectId) {
+    const messages = {
+        orphaned: 'ลบไฟล์จากโปรเจคที่ถูกลบทั้งหมด?',
+        temp: 'ลบไฟล์ชั่วคราว (segment, concat, sub_test)?',
+        project: 'ลบไฟล์ทั้งหมดของโปรเจคนี้? (ข้อมูลโปรเจคจะยังอยู่)'
+    };
+
+    if (!confirm(messages[action] || 'ยืนยันการลบ?')) return;
+
+    try {
+        showToast('🧹 กำลังเคลียร์ไฟล์...', 'info');
+        const result = await fetch('/api/storage', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, projectId })
+        }).then(r => r.json());
+
+        if (result.success) {
+            showToast(`✅ ลบสำเร็จ ${result.deletedCount} ไฟล์ คืนพื้นที่ ${result.freedSpaceFormatted}`, 'success');
+            await loadStorageInfo(); // Refresh
+        } else {
+            showToast('ลบล้มเหลว', 'error');
+        }
+    } catch (err) {
+        showToast('เกิดข้อผิดพลาด: ' + err.message, 'error');
+    }
+};
 
 function renderApiKeys(keys, activeKeyId) {
     const list = document.getElementById('api-keys-list');
@@ -1707,16 +2040,27 @@ async function loadFacebookSettings() {
                 listEl.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">ยังไม่มี Facebook Page — เพิ่ม Page ด้านล่าง</p>';
             } else {
                 listEl.innerHTML = cachedFbPages.map(p => `
-                    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(66, 133, 244, 0.08); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: var(--radius-md); margin-bottom: 8px;">
-                        <span style="font-size: 1.2rem;">✅</span>
-                        <div style="flex: 1; min-width: 0;">
-                            <strong>${escapeHtml(p.pageName || p.pageId)}</strong>
-                            <span style="color: var(--text-muted); font-size: 0.8rem; display: block; word-break: break-all;">
-                                ID: ${p.pageId} · Token: ${p.tokenMasked}
-                            </span>
+                    <div style="padding: 12px 16px; background: rgba(66, 133, 244, 0.08); border: 1px solid rgba(66, 133, 244, 0.2); border-radius: var(--radius-md); margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span style="font-size: 1.2rem;">✅</span>
+                            <div style="flex: 1; min-width: 0;">
+                                <strong>${escapeHtml(p.pageName || p.pageId)}</strong>
+                                <span style="color: var(--text-muted); font-size: 0.8rem; display: block; word-break: break-all;">
+                                    ID: ${p.pageId} · Token: ${p.tokenMasked}
+                                </span>
+                            </div>
+                            <button class="btn btn-sm btn-secondary" onclick="editFacebookPageToken('${p.pageId}', '${escapeHtml(p.pageName || p.pageId)}')" title="แก้ไข Token">✏️ แก้ไข</button>
+                            <button class="btn btn-sm btn-secondary" onclick="testExistingFacebookPage('${p.pageId}')" title="ทดสอบ">ทดสอบ</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeFacebookPage('${p.id}')" title="ลบ">🗑️</button>
                         </div>
-                        <button class="btn btn-sm btn-secondary" onclick="testExistingFacebookPage('${p.pageId}')" title="ทดสอบ">ทดสอบ</button>
-                        <button class="btn btn-sm btn-danger" onclick="removeFacebookPage('${p.id}')" title="ลบ">🗑️</button>
+                        <div id="fb-edit-form-${p.pageId}" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(66, 133, 244, 0.15);">
+                            <label style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px; display: block;">🔑 ใส่ Token ใหม่สำหรับ ${escapeHtml(p.pageName || p.pageId)}</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="fb-edit-token-${p.pageId}" placeholder="ใส่ Page Access Token ใหม่..." style="flex: 1; padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary); font-size: 0.9rem;">
+                                <button class="btn btn-primary btn-sm" onclick="updateFacebookPageToken('${p.pageId}', '${escapeHtml(p.pageName || '')}')">💾 บันทึก</button>
+                                <button class="btn btn-secondary btn-sm" onclick="document.getElementById('fb-edit-form-${p.pageId}').style.display='none'">ยกเลิก</button>
+                            </div>
+                        </div>
                     </div>
                 `).join('');
             }
@@ -1847,6 +2191,42 @@ window.removeFacebookPage = async function (id) {
         await loadFacebookSettings();
     } catch (err) {
         showToast('ลบล้มเหลว: ' + err.message, 'error');
+    }
+};
+
+window.editFacebookPageToken = function (pageId, pageName) {
+    const formEl = document.getElementById(`fb-edit-form-${pageId}`);
+    if (formEl) {
+        // Toggle visibility
+        const isVisible = formEl.style.display !== 'none';
+        formEl.style.display = isVisible ? 'none' : 'block';
+        if (!isVisible) {
+            // Focus on input
+            const input = document.getElementById(`fb-edit-token-${pageId}`);
+            if (input) input.focus();
+        }
+    }
+};
+
+window.updateFacebookPageToken = async function (pageId, pageName) {
+    const input = document.getElementById(`fb-edit-token-${pageId}`);
+    const newToken = input?.value?.trim();
+
+    if (!newToken) {
+        showToast('กรุณาใส่ Token ใหม่', 'warning');
+        return;
+    }
+
+    try {
+        const result = await api('/settings/facebook', {
+            method: 'POST',
+            body: { pageId, pageToken: newToken, pageName }
+        });
+
+        showToast(`✅ ${result.message}`, 'success');
+        await loadFacebookSettings();
+    } catch (err) {
+        showToast('อัปเดต Token ล้มเหลว: ' + err.message, 'error');
     }
 };
 
@@ -2346,13 +2726,16 @@ function renderBgmList() {
 }
 
 function populateBgmDropdown() {
-    const sel = document.getElementById('video-bgm');
-    if (!sel) return;
-    const current = sel.value;
-    sel.innerHTML = '<option value="">ไม่ใส่ BGM</option>' + allBgms.map(b =>
-        `<option value="${b.fileName}">${escapeHtml(b.label)}</option>`
-    ).join('');
-    sel.value = current || '';
+    const dropdownIds = ['video-bgm', 'ap-bgm'];
+    dropdownIds.forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const current = sel.value;
+        sel.innerHTML = '<option value="">ไม่ใส่ BGM</option>' + allBgms.map(b =>
+            `<option value="${b.fileName}">${escapeHtml(b.label)}</option>`
+        ).join('');
+        sel.value = current || '';
+    });
 }
 
 window.uploadBgm = async function () {
@@ -2400,9 +2783,53 @@ window.deleteBgm = async function (id) {
         showToast('ลบล้มเหลว', 'error');
     }
 };
+
+window.quickUploadBgm = async function () {
+    const fileInput = document.getElementById('quick-bgm-file');
+    const label = document.getElementById('quick-bgm-label')?.value.trim() || '';
+
+    if (!fileInput?.files?.length) {
+        showToast('กรุณาเลือกไฟล์เพลงก่อน', 'warning');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('label', label || file.name.replace(/\.[^.]+$/, ''));
+
+    const btn = document.getElementById('btn-quick-bgm-upload');
+    btn.disabled = true;
+    btn.textContent = '⏳ กำลังอัพโหลด...';
+
+    try {
+        const res = await fetch('/api/bgm', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        showToast('อัพโหลด BGM สำเร็จ! 🎵', 'success');
+
+        // Clear inputs
+        fileInput.value = '';
+        document.getElementById('quick-bgm-label').value = '';
+        document.getElementById('quick-bgm-filename').textContent = '';
+
+        // Reload BGM list and auto-select the new file
+        await loadBgmList();
+        const sel = document.getElementById('video-bgm');
+        if (sel && data.fileName) {
+            sel.value = data.fileName;
+        }
+    } catch (e) {
+        showToast('อัพโหลดล้มเหลว: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📤 อัพโหลด';
+    }
+};
 // --- Category Management ---
 function populateCategoryDropdowns() {
-    const dropdowns = ['input-category', 'filter-category', 'bulk-category'];
+    const dropdowns = ['input-category', 'filter-category', 'bulk-category', 'ap-category'];
     dropdowns.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -2478,6 +2905,77 @@ function renderCategoryList() {
 window.renderCategoryList = renderCategoryList;
 
 window.filterByCategory = function () {
+    dashboardPage = 1;
+    loadDashboard();
+};
+
+// --- Dashboard Pagination ---
+function renderDashboardPagination(totalItems, totalPages) {
+    const paginationEl = document.getElementById('dashboard-pagination');
+    if (!paginationEl) return;
+
+    if (totalPages <= 1) {
+        paginationEl.innerHTML = `<div class="pagination-info">ทั้งหมด ${totalItems} โปรเจค</div>`;
+        return;
+    }
+
+    const startItem = (dashboardPage - 1) * dashboardPageSize + 1;
+    const endItem = Math.min(dashboardPage * dashboardPageSize, totalItems);
+
+    // Build page buttons
+    let pageButtons = '';
+    const maxVisible = 5;
+    let startPage = Math.max(1, dashboardPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    if (startPage > 1) {
+        pageButtons += `<button class="pagination-btn" onclick="goToDashboardPage(1)">1</button>`;
+        if (startPage > 2) pageButtons += `<span class="pagination-ellipsis">...</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        pageButtons += `<button class="pagination-btn${i === dashboardPage ? ' active' : ''}" onclick="goToDashboardPage(${i})">${i}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pageButtons += `<span class="pagination-ellipsis">...</span>`;
+        pageButtons += `<button class="pagination-btn" onclick="goToDashboardPage(${totalPages})">${totalPages}</button>`;
+    }
+
+    paginationEl.innerHTML = `
+        <div class="pagination-info">แสดง ${startItem}–${endItem} จาก ${totalItems} โปรเจค</div>
+        <div class="pagination-controls">
+            <button class="pagination-btn pagination-nav" onclick="goToDashboardPage(${dashboardPage - 1})" ${dashboardPage <= 1 ? 'disabled' : ''}>‹ ก่อนหน้า</button>
+            ${pageButtons}
+            <button class="pagination-btn pagination-nav" onclick="goToDashboardPage(${dashboardPage + 1})" ${dashboardPage >= totalPages ? 'disabled' : ''}>ถัดไป ›</button>
+        </div>
+        <div class="pagination-size">
+            <label>แสดง</label>
+            <select onchange="changeDashboardPageSize(this.value)">
+                <option value="10" ${dashboardPageSize === 10 ? 'selected' : ''}>10</option>
+                <option value="20" ${dashboardPageSize === 20 ? 'selected' : ''}>20</option>
+                <option value="50" ${dashboardPageSize === 50 ? 'selected' : ''}>50</option>
+                <option value="100" ${dashboardPageSize === 100 ? 'selected' : ''}>100</option>
+            </select>
+            <label>รายการ</label>
+        </div>
+    `;
+}
+
+window.goToDashboardPage = function (page) {
+    dashboardPage = page;
+    loadDashboard();
+    // Scroll to top of projects list
+    const list = document.getElementById('projects-list');
+    if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+window.changeDashboardPageSize = function (size) {
+    dashboardPageSize = parseInt(size, 10);
+    dashboardPage = 1;
     loadDashboard();
 };
 
@@ -2604,3 +3102,284 @@ window.bulkCreateProjects = async function () {
     document.getElementById('bulk-topics-list').innerHTML = '';
     navigateTo('dashboard');
 };
+
+// --- Smart Autopilot ---
+let autopilotActive = false;
+
+window.stopSmartAutopilot = function () {
+    autopilotActive = false;
+    document.getElementById('btn-stop-autopilot').style.display = 'none';
+    logAutopilot('⛔ ยกเลิกการทำงานแล้ว (รอรอบปัจจุบันเสร็จสิ้นระบบจะหยุด)');
+    document.getElementById('btn-start-autopilot').disabled = false;
+};
+
+function logAutopilot(msg) {
+    const container = document.getElementById('ap-log-container');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.style.marginBottom = '6px';
+    div.innerHTML = `<span style="color:var(--text-muted)">[${new Date().toLocaleTimeString('th-TH')}]</span> ${msg}`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+window.startSmartAutopilot = async function () {
+    if (autopilotActive) return;
+
+    const catalog = document.getElementById('ap-catalog').value.trim();
+    if (!catalog) {
+        showToast('กรุณาระบุหัวข้อแคตตาล็อก', 'warning');
+        return;
+    }
+
+    const count = parseInt(document.getElementById('ap-count').value);
+    const platform = document.getElementById('ap-platform').value;
+    const duration = document.getElementById('ap-duration').value;
+    const voice = document.getElementById('ap-voice').value;
+    const imageStyle = document.getElementById('ap-image-style').value;
+    const isSubtitleEnabled = document.getElementById('ap-subtitle').value === 'yes';
+    const lang = document.getElementById('ap-language').value;
+    const category = document.getElementById('ap-category').value;
+    const delaySeconds = parseInt(document.getElementById('ap-delay')?.value || '120');
+    const bgmFile = document.getElementById('ap-bgm')?.value || null;
+    const bgmVolume = parseFloat(document.getElementById('ap-bgm-volume')?.value || '20') / 100;
+
+    autopilotActive = true;
+    document.getElementById('ap-progress-section').style.display = 'block';
+    document.getElementById('btn-stop-autopilot').style.display = 'inline-block';
+
+    const startBtn = document.getElementById('btn-start-autopilot');
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<span class="spinner"></span> กำลังรัน Smart Autopilot...';
+
+    const container = document.getElementById('ap-log-container');
+    container.innerHTML = ''; // clear previous logs
+
+    logAutopilot(`🚀 <b>เริ่มระบบ Smart Autopilot</b> (${count} เรื่อง)`);
+    logAutopilot(`หมวดหมู่/หัวข้อที่กำหนด: <span style="color:var(--accent-primary)">"${catalog}"</span>`);
+
+    try {
+        logAutopilot(`🤖 กำลังให้ AI คิดหัวข้อคลิป จำนวน ${count} เรื่อง...`);
+        const topicPrompt = `คุณคือครีเอเตอร์นักสร้างสรรค์ ช่วยคิดหัวข้อคอนเทนต์จำนวน ${count} เรื่อง ในตีม/หัวข้อหลัก: "${catalog}"
+แพลตฟอร์ม: ${platform}
+ภาษา: ${lang === 'th' ? 'Thai' : 'English'}
+
+ตอบกลับเป็น JSON array ประกอบด้วย:
+[
+  { "name": "ชื่อหัวข้อคลิปที่น่าสนใจ", "description": "โครงเรื่อง/บทสรุป ว่าคลิปเกี่ยวกับอะไร เพื่อให้ AI เล่าเรื่องได้ถูก" },
+  ...
+]
+ตอบแค่ JSON array ห้ามพิมพ์ข้อความอื่นเพิ่มเติม`;
+
+        const topicRes = await api('/ai/chat', {
+            method: 'POST',
+            body: { message: topicPrompt, context: 'brainstorm' }
+        });
+
+        let topics = [];
+        try {
+            let text = topicRes.reply.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            topics = JSON.parse(text);
+        } catch (e) {
+            logAutopilot(`⚠ AI ไม่ยอมตอบเป็น JSON ที่ถูกต้อง พยายามสร้างจากข้อความดิบ...`);
+            // simplistic fallback
+            topics = Array(count).fill(catalog).map((cat, i) => ({ name: `${cat} - Part ${i + 1}`, description: `A video about ${cat}` }));
+        }
+
+        if (!Array.isArray(topics) || topics.length === 0) {
+            throw new Error('คิดหัวข้อไม่สำเร็จจากข้อมูล AI');
+        }
+
+        logAutopilot(`✅ คิดหัวข้อสำเร็จ! ได้ ${topics.slice(0, count).length} เรื่อง`);
+        topics.slice(0, count).forEach((t, i) => logAutopilot(` - ${i + 1}. ${t.name}`));
+
+        let completed = 0;
+        let failed = 0;
+
+        for (let i = 0; i < topics.length && i < count; i++) {
+            if (!autopilotActive) break;
+
+            const topic = topics[i];
+            logAutopilot(`<hr style="border-color:var(--border-color);margin:12px 0;"/>`);
+            logAutopilot(`🎬 <b>เริ่มทำเรื่องที่ ${i + 1}/${count}: ${topic.name}</b>`);
+            logAutopilot(`[1/5] สร้างโปรเจคใหม่...`);
+
+            let proj = null;
+            try {
+                // 1. Create Project
+                proj = await api('/projects', {
+                    method: 'POST',
+                    body: { name: topic.name, description: topic.description, platform, language: lang, category }
+                });
+
+                if (!autopilotActive) break;
+
+                // 2. Generate Script
+                logAutopilot(`[2/5] 📝 กำลังเขียนบท (Script)...`);
+                const scriptRes = await api('/ai/generate-script', {
+                    method: 'POST',
+                    body: {
+                        topic: topic.description,
+                        platform: platform,
+                        language: lang,
+                        style: 'storytelling',
+                        duration: duration,
+                        gender: 'neutral'
+                    }
+                });
+
+                let updatedSteps = {
+                    ...proj.steps,
+                    script: {
+                        status: 'done',
+                        content: scriptRes.script,
+                        title: scriptRes.title,
+                        description: scriptRes.description,
+                        generatedAt: new Date().toISOString()
+                    }
+                };
+                await api(`/projects/${proj.id}`, { method: 'PUT', body: { steps: updatedSteps } });
+                proj.steps = updatedSteps;
+
+                if (!autopilotActive) break;
+
+                // 3. Generate Audio
+                logAutopilot(`[3/5] 🎤 กำลังสร้างเสียงบรรยาย Voice: ${voice}...`);
+                const audioRes = await api('/tts/generate', {
+                    method: 'POST',
+                    body: {
+                        text: scriptRes.script,
+                        projectId: proj.id,
+                        voice: voice,
+                        emotion: 'neutral'
+                    }
+                });
+
+                updatedSteps = {
+                    ...proj.steps,
+                    audio: {
+                        status: 'done',
+                        filePath: audioRes.filePath,
+                        voice: voice,
+                        generatedAt: new Date().toISOString()
+                    }
+                };
+                await api(`/projects/${proj.id}`, { method: 'PUT', body: { steps: updatedSteps } });
+                proj.steps = updatedSteps;
+
+                if (!autopilotActive) break;
+
+                // 4. Generate Images
+                logAutopilot(`[4/5] 🖼️ กำลังสร้างภาพประกอบ Style: ${imageStyle}...`);
+                let promptsToUse = scriptRes.imagePrompts || [];
+                if (promptsToUse.length === 0) {
+                    const lines = scriptRes.script.split('\\n').filter(l => l.trim().length > 10);
+                    promptsToUse = lines.slice(0, 5).map(l => l.substring(0, 80));
+                } else if (promptsToUse.length > 5) {
+                    promptsToUse = promptsToUse.slice(0, 5);
+                }
+
+                let aspectRatio = '16:9';
+                if (platform.includes('shorts') || platform.includes('tiktok') || platform.includes('reels')) aspectRatio = '9:16';
+                if (platform === 'square') aspectRatio = '1:1';
+
+                const imagesRes = await api('/images/generate-batch', {
+                    method: 'POST',
+                    body: {
+                        prompts: promptsToUse,
+                        projectId: proj.id,
+                        style: imageStyle,
+                        aspectRatio: aspectRatio,
+                        scriptContext: scriptRes.script
+                    }
+                });
+
+                const successFiles = imagesRes.results.filter(r => r.success).map(r => r.filePath);
+                if (successFiles.length === 0) throw new Error('Cannot generate ANY images.');
+
+                updatedSteps = {
+                    ...proj.steps,
+                    images: {
+                        status: 'done',
+                        files: successFiles,
+                        generatedAt: new Date().toISOString()
+                    }
+                };
+                await api(`/projects/${proj.id}`, { method: 'PUT', body: { steps: updatedSteps } });
+                proj.steps = updatedSteps;
+
+                if (!autopilotActive) break;
+
+                // 5. Generate Video
+                logAutopilot(`[5/5] 🎬 เริ่มตั้งค่าตัดต่อและประกอบคลิปวิดีโอ...`);
+
+                const videoRes = await api('/video/create', {
+                    method: 'POST',
+                    body: {
+                        projectId: proj.id,
+                        audioFile: audioRes.filePath,
+                        imageFiles: successFiles,
+                        format: platform,
+                        animation: 'random',
+                        subtitle: isSubtitleEnabled,
+                        subtitleStyle: { font: 'Kanit', size: '80', color: 'yellow_black', bg: 'normal', pos: 'top' },
+                        scriptText: scriptRes.script,
+                        ttsEmotion: 'neutral',
+                        bgmFile: bgmFile,
+                        bgmVolume: bgmVolume
+                    }
+                });
+
+                updatedSteps = {
+                    ...proj.steps,
+                    video: {
+                        status: 'done',
+                        filePath: videoRes.filePath,
+                        fileName: videoRes.fileName,
+                        resolution: videoRes.resolution,
+                        generatedAt: new Date().toISOString()
+                    }
+                };
+                await api(`/projects/${proj.id}`, { method: 'PUT', body: { steps: updatedSteps } });
+
+                logAutopilot(`✨ <b style="color:var(--success)">สร้างคลิปที่ ${i + 1} สำเร็จ!</b>`);
+                completed++;
+
+            } catch (err) {
+                logAutopilot(`❌ <b style="color:var(--danger)">เกิดข้อผิดพลาดกับคลิปที่ ${i + 1}:</b> ${err.message}`);
+                failed++;
+            }
+
+            // Wait between projects if there's a delay and it's not the last project
+            if (i < Math.min(topics.length, count) - 1 && autopilotActive) {
+                if (delaySeconds > 0) {
+                    logAutopilot(`⏱️ <i>พัก ${delaySeconds} วินาที ระหว่างรอบเพื่อกัน Rate Limit...</i>`);
+                    await new Promise(r => setTimeout(r, delaySeconds * 1000));
+                } else {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+        }
+
+        logAutopilot(`<hr style="border-color:var(--border-color);margin:12px 0;"/>`);
+        if (autopilotActive) {
+            logAutopilot(`🎉 <b>Autopilot จบการทำงาน!</b>`);
+        } else {
+            logAutopilot(`⛔ <b>Autopilot ถูกยกเลิกกลางคัน</b>`);
+        }
+        logAutopilot(`ทำสำเร็จ: ${completed} เรื่อง, ล้มเหลว: ${failed} เรื่อง`);
+        logAutopilot(`👉 ไปที่เมนู "แดชบอร์ด" เพื่อดูวิดีโอที่สร้างเสร็จแล้ว`);
+
+    } catch (err) {
+        logAutopilot(`❌ <b>ระบบพบข้อผิดพลาดหล้ายแรง:</b> ${err.message}`);
+        showToast('Autopilot หยุดทำงานฉุกเฉิน', 'error');
+    } finally {
+        autopilotActive = false;
+        document.getElementById('btn-stop-autopilot').style.display = 'none';
+
+        const startBtn = document.getElementById('btn-start-autopilot');
+        startBtn.disabled = false;
+        startBtn.innerHTML = '🚀 เริ่มรันระบบ Autopilot';
+    }
+};
+

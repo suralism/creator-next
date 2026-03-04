@@ -18,11 +18,17 @@ export async function GET(request, { params }) {
     const mimeTypes = {
         '.wav': 'audio/wav',
         '.mp3': 'audio/mp3',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
         '.mp4': 'video/mp4',
+        '.mov': 'video/quicktime',
+        '.webm': 'video/webm',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
         '.png': 'image/png',
         '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
     };
 
     const contentType = mimeTypes[ext] || 'application/octet-stream';

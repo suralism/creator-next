@@ -15,6 +15,7 @@ export async function POST(request) {
 
         const platformGuide = {
             youtube_shorts: 'YouTube Shorts (วิดีโอสั้น 30-60 วินาที)',
+            youtube_doc: 'YouTube Documentary (สารคดีสั้นกระชับฉับไว 3-15 นาที แนวนอน 16:9 เน้นเล่าเรื่อง ข้อมูลจริง เจาะลึก)',
             podcast: 'Podcast (เนื้อหา 3-10 นาที)',
             tiktok: 'TikTok (วิดีโอสั้น 15-60 วินาที)',
             reels: 'Instagram Reels (วิดีโอสั้น 30-90 วินาที)'

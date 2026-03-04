@@ -95,6 +95,7 @@ export async function POST(request) {
                     'drama': 'Speak the following text with a highly dramatic, intense, and captivating storytelling tone: ',
                     'calm': 'Speak the following text with a very calm, peaceful, soothing, and relaxing tone, like a meditation guide or Dharma talk: ',
                     'professional': 'Speak the following text with a confident, professional, clear, and authoritative business presentation tone: ',
+                    'documentary': 'Speak the following text like a fast-paced documentary narrator. Use a punchy, urgent, confident, and authoritative tone. Speak quickly with sharp emphasis on key facts. Keep the pacing brisk and dynamic, like a Netflix or Vox documentary voiceover. Deliver each sentence with energy and conviction: ',
                     'serious': 'Speak the following text with a very serious, dramatic, and formal tone: '
                 };
                 promptWithEmotion = `${emotionPrompts[emotion] || ''}${chunkText}`;

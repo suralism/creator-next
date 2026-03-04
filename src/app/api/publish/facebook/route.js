@@ -47,7 +47,7 @@ export async function POST(request) {
 
         // Step 1: Initialize upload session
         const initResponse = await fetch(
-            `https://graph.facebook.com/v19.0/${fbPageId}/video_reels`,
+            `https://graph.facebook.com/v22.0/${fbPageId}/video_reels`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -67,7 +67,7 @@ export async function POST(request) {
 
         // Step 2: Upload binary
         const uploadResponse = await fetch(
-            `https://rupload.facebook.com/video-upload/v19.0/${videoId}`,
+            `https://rupload.facebook.com/video-upload/v22.0/${videoId}`,
             {
                 method: 'POST',
                 headers: {
@@ -103,7 +103,7 @@ export async function POST(request) {
         }
 
         const finishResponse = await fetch(
-            `https://graph.facebook.com/v19.0/${fbPageId}/video_reels`,
+            `https://graph.facebook.com/v22.0/${fbPageId}/video_reels`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
