@@ -24,7 +24,7 @@ export async function POST(request) {
     try {
         const ai = new GoogleGenAI({ apiKey: keyToTest });
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.1-flash-lite-preview',
             contents: 'ตอบว่า "OK" แค่คำเดียว',
         });
 

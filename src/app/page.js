@@ -643,6 +643,62 @@ function VideoStep() {
                     </div>
                 </div>
 
+                {/* Title Overlay Settings */}
+                <div id="title-overlay-container" style={{ display: 'block', background: 'var(--bg-card)', padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '20px', border: '1px solid var(--border-color)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                        <h4 style={{ margin: 0, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>🖼️</span> AI Cover Image (ภาพหน้าปกเรียก Engagement)
+                        </h4>
+                        <div className="toggle-switch">
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                <input type="checkbox" id="check-title-overlay" defaultChecked onChange={(e) => {
+                                    const opts = document.getElementById('title-options');
+                                    if (opts) opts.style.opacity = e.target.checked ? '1' : '0.5';
+                                    if (opts) opts.style.pointerEvents = e.target.checked ? 'auto' : 'none';
+                                }} />
+                                <span style={{ fontSize: '0.9rem' }}>เปิดใช้งาน</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="title-options" className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: 0 }}>
+                        <div className="form-group">
+                            <label htmlFor="title-ai-analysis">💡 AI วิเคราะห์หัวข้อ</label>
+                            <select id="title-ai-analysis" defaultValue="yes">
+                                <option value="yes">✨ AI สร้างคำพาดหัว (Hook)</option>
+                                <option value="no">✍️ ใช้ตามชื่อโปรเจคจริง</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="title-duration">⏱️ แสดงนาน (วินาที)</label>
+                            <select id="title-duration" defaultValue="5">
+                                <option value="3">3 วินาที</option>
+                                <option value="4">4 วินาที</option>
+                                <option value="5">5 วินาที</option>
+                                <option value="6">6 วินาที</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button className="btn btn-secondary btn-sm" id="btn-preview-cover" onClick={() => window.generateCoverPreview()} style={{ flex: 1 }}>
+                                <span id="spinner-cover" className="spinner hidden" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
+                                🖼️ พรีวิวหน้าปก (Preview Cover)
+                            </button>
+                        </div>
+                        <div id="cover-preview-area" className="hidden" style={{ position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)', background: 'var(--bg-input)', maxWidth: '280px', margin: '0 auto' }}>
+                            <img id="cover-preview-img" src="" alt="Cover Preview" style={{ width: '100%', maxHeight: '400px', objectFit: 'contain', display: 'block' }} />
+                            <div id="cover-preview-text" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '12px', background: 'rgba(0,0,0,0.8)', fontSize: '0.8rem', color: 'white', borderTop: '1px solid rgba(255,255,255,0.1)' }}></div>
+                            <button onClick={() => { document.getElementById('cover-preview-area').classList.add('hidden'); window.currentCoverImage = null; }} style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                        </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px', marginBottom: 0 }}>
+                        * ระบบจะใช้ AI สร้างภาพหน้าปกใหม่พร้อมพาดหัวที่น่าสนใจเป็นภาพแรกของคลิป เพื่อเพิ่มยอดวิว
+                    </p>
+                </div>
+
                 <div id="subtitle-styles-container" style={{ display: 'block', background: 'var(--bg-input)', padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '24px', border: '1px solid var(--border-color)' }}>
                     <h4 style={{ marginBottom: '12px', fontSize: '0.95rem' }}>🎨 ปรับแต่งสไตล์ซับไตเติ้ล</h4>
                     <div className="form-row" style={{ marginBottom: '0' }}>

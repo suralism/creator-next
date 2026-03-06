@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getActiveKey } from '@/lib/settings';
-import { ROOT_DIR, VIDEOS_DIR } from '@/lib/paths';
+import { ROOT_DIR, VIDEOS_DIR, IMAGES_DIR } from '@/lib/paths';
 
 const execAsync = promisify(exec);
 
@@ -66,50 +66,177 @@ function formatTime(seconds) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
-function createSrtFile(text, totalDuration, outputPath, isFastPace = false) {
-    // 1. Remove non-spoken stage directions/emotions same as we did for TTS
-    let textStr = text.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-    // 2. Normalize whitespace
-    textStr = textStr.replace(/\s+/g, ' ').trim();
+// Use AI to split Thai text into natural subtitle phrases
+async function aiChunkText(text, apiKey) {
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `แบ่งข้อความภาษาไทยนี้ออกเป็นวลีสั้นๆ สำหรับซับไตเติ้ล
+
+กฎ:
+- แต่ละบรรทัดต้องเป็นวลีที่สมบูรณ์ อ่านแล้วเข้าใจได้
+- ไม่เกิน 5 คำต่อบรรทัด
+- ห้ามตัดคำกลางคำ
+- ตอบเป็นข้อความธรรมดา 1 วลีต่อ 1 บรรทัด
+- ห้ามใส่หมายเลข ห้ามใส่เครื่องหมายใดๆ
+
+ข้อความ:
+${text.substring(0, 3000)}
+
+ผลลัพธ์:`;
+
+        const result = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite-preview',
+            contents: prompt
+        });
+
+        let responseText = '';
+        if (result && result.response && typeof result.response.text === 'function') {
+            responseText = result.response.text();
+        } else if (result && typeof result.text === 'string') {
+            responseText = result.text;
+        } else if (result && typeof result.text === 'function') {
+            responseText = result.text();
+        }
+
+        if (responseText) {
+            responseText = responseText.replace(/```[^`]*```/g, '').trim();
+            const lines = responseText.split('\n')
+                .map(l => l.replace(/^\d+[\.\)\-\s]+/, '').trim())
+                .filter(l => l.length > 0 && l.length < 100);
+
+            if (lines.length >= 3) {
+                console.log('AI chunked text into ' + lines.length + ' phrases');
+                return lines;
+            }
+        }
+    } catch (e) {
+        console.error('AI chunking failed:', e.message);
+    }
+    return null;
+}
+
+// Fallback: mechanical word-count based chunking
+function mechanicalChunk(text) {
+    const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
+    const allTokens = [];
+    for (const { segment, isWordLike } of segmenter.segment(text)) {
+        allTokens.push({ text: segment, isWord: isWordLike });
+    }
+
+    const maxWords = 5;
     const chunks = [];
     let currentChunk = '';
+    let wordCount = 0;
 
-    // Use shorter chunks for fast-paced speech (documentary style)
-    const maxChunkLen = isFastPace ? 12 : 20;
-
-    // Split Thai script properly using Intl.Segmenter
-    const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
-    const segments = segmenter.segment(textStr);
-
-    for (const { segment } of segments) {
-        if (currentChunk.length + segment.length > maxChunkLen) {
+    for (const { text: t, isWord } of allTokens) {
+        if (isWord && wordCount >= maxWords && currentChunk.trim()) {
             chunks.push(currentChunk.trim());
-            currentChunk = '';
+            currentChunk = t;
+            wordCount = 1;
+        } else {
+            currentChunk += t;
+            if (isWord) wordCount++;
         }
-        currentChunk += segment;
     }
-    if (currentChunk.trim()) chunks.push(currentChunk.trim());
+    if (currentChunk.trim()) {
+        if (wordCount <= 1 && chunks.length > 0) {
+            chunks[chunks.length - 1] += currentChunk;
+        } else {
+            chunks.push(currentChunk.trim());
+        }
+    }
+    return chunks;
+}
 
-    const totalChars = chunks.reduce((acc, c) => acc + c.replace(/\s/g, '').length, 0);
+// Apply timing to chunks and write SRT file
+function writeChunksToSrt(chunks, totalDuration, outputPath) {
+    if (!chunks || chunks.length === 0) return;
+
+    function estimateSyllables(str) {
+        return Math.max(1, Math.round(str.replace(/\s/g, '').length / 2.5));
+    }
+
+    const chunkSyllables = chunks.map(c => estimateSyllables(c));
+    const totalSyllables = chunkSyllables.reduce((a, b) => a + b, 0);
+
+    const gapPerChunk = chunks.length > 1 ? 0.08 : 0;
+    const totalGaps = gapPerChunk * (chunks.length - 1);
+    const speakTime = totalDuration - totalGaps;
+
     let srtContent = '';
-    let currentTime = 0;
-    // Small overlap so subtitle appears slightly before the word is spoken
-    const overlap = isFastPace ? 0.05 : 0;
+    let cursor = 0;
 
-    chunks.forEach((chunk, index) => {
-        const chunkChars = chunk.replace(/\s/g, '').length;
-        const duration = (chunkChars / totalChars) * totalDuration;
-        const startTime = formatTime(Math.max(0, currentTime - overlap));
-        const endTime = formatTime(currentTime + duration);
-        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${chunk}\n\n`;
-        currentTime += duration;
+    chunks.forEach((chunk, i) => {
+        const syllRatio = chunkSyllables[i] / totalSyllables;
+        const chunkDur = syllRatio * speakTime;
+        const start = Math.max(0, cursor);
+        const end = Math.min(totalDuration, cursor + chunkDur);
+        srtContent += `${i + 1}\n${formatTime(start)} --> ${formatTime(end)}\n${chunk}\n\n`;
+        cursor = end + gapPerChunk;
     });
-    fs.writeFileSync(outputPath, srtContent);
+
+    fs.writeFileSync(outputPath, srtContent.trim());
+    console.log(`SRT: ${chunks.length} chunks, ${totalSyllables} syllables, ${totalDuration.toFixed(1)}s`);
+}
+
+// Main fallback: AI chunking first, then mechanical
+async function createSrtFile(text, totalDuration, outputPath, isFastPace = false, apiKey = null) {
+    let textStr = text.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    textStr = textStr.replace(/\s+/g, ' ').trim();
+
+    let chunks = null;
+    if (apiKey) {
+        chunks = await aiChunkText(textStr, apiKey);
+    }
+    if (!chunks || chunks.length === 0) {
+        console.log('Using mechanical word segmentation...');
+        chunks = mechanicalChunk(textStr);
+    }
+
+    writeChunksToSrt(chunks, totalDuration, outputPath);
+}
+
+// Shift all SRT timestamps by a given offset (in seconds)
+function shiftSrtTimestamps(srtText, offsetSeconds) {
+    function parseTimeToSeconds(timeStr) {
+        const match = timeStr.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+        if (!match) return 0;
+        return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 1000;
+    }
+
+    function secondsToSrtTime(totalSec) {
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = Math.floor(totalSec % 60);
+        const ms = Math.floor((totalSec % 1) * 1000);
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+    }
+
+    const blocks = srtText.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+    let result = '';
+    let seq = 1;
+
+    for (const block of blocks) {
+        if (!block.trim()) continue;
+        const lines = block.split('\n').map(l => l.trim()).filter(l => l !== '');
+        const timeIdx = lines.findIndex(l => l.includes('-->'));
+        if (timeIdx === -1) continue;
+
+        const timeParts = lines[timeIdx].split('-->');
+        const startSec = parseTimeToSeconds(timeParts[0]) + offsetSeconds;
+        const endSec = parseTimeToSeconds(timeParts[1]) + offsetSeconds;
+        const text = lines.slice(timeIdx + 1).join('\n');
+
+        result += `${seq}\n${secondsToSrtTime(startSec)} --> ${secondsToSrtTime(endSec)}\n${text}\n\n`;
+        seq++;
+    }
+
+    return result.trim();
 }
 
 export async function POST(request) {
     try {
-        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, scriptText, bgmFile, bgmVolume, ttsEmotion } = await request.json();
+        const { projectId, audioFile, imageFiles, format, animation, subtitle, subtitleStyle, titleOverlay, scriptText, bgmFile, bgmVolume, ttsEmotion } = await request.json();
 
         if (!audioFile || !imageFiles || imageFiles.length === 0) {
             return NextResponse.json({ error: 'ต้องมีไฟล์เสียงและรูปภาพ' }, { status: 400 });
@@ -119,7 +246,6 @@ export async function POST(request) {
         const outputFileName = `${projectId || 'video'}_${videoId}.mp4`;
         const outputPath = path.join(VIDEOS_DIR, outputFileName);
 
-        // Resolve file paths - handle both /uploads/ and /api/uploads/ prefixes
         const audioPath = path.join(ROOT_DIR, 'data', audioFile.replace('/api/uploads/', '').replace('/uploads/', ''));
 
         let audioDuration;
@@ -152,11 +278,12 @@ export async function POST(request) {
         let srtPath = null;
         let srtRelativePath = null;
 
-        // Detect fast-paced speech (documentary, drama, etc.)
         const fastPaceEmotions = ['documentary', 'drama', 'surprised', 'angry'];
         const isFastPace = fastPaceEmotions.includes(ttsEmotion);
 
-        if (subtitle && scriptText) {
+        let activeTitleText = titleOverlay?.projectName || 'Untitled';
+
+        if ((subtitle && scriptText) || (titleOverlay && titleOverlay.show)) {
             srtPath = path.join(VIDEOS_DIR, `subtitles_${videoId}.srt`);
             srtRelativePath = `data/videos/subtitles_${videoId}.srt`;
 
@@ -164,207 +291,281 @@ export async function POST(request) {
             try {
                 const apiKey = await getActiveKey();
                 if (apiKey) {
-                    console.log(`Attempting Gemini SRT generation (fastPace=${isFastPace})...`);
                     const ai = new GoogleGenAI({ apiKey });
-                    const audioBuffer = fs.readFileSync(audioPath);
-                    const audioBase64 = audioBuffer.toString('base64');
-                    // Get mime type based on extension
-                    const ext = path.extname(audioPath).toLowerCase();
-                    let mimeType = 'audio/wav';
-                    if (ext === '.mp3') mimeType = 'audio/mp3';
-                    else if (ext === '.aac') mimeType = 'audio/aac';
-                    else if (ext === '.m4a') mimeType = 'audio/m4a';
 
-                    const maxChars = isFastPace ? 12 : 20;
-                    const paceNote = isFastPace
-                        ? `\nIMPORTANT: This audio has FAST-PACED speech (documentary/narrator style). The speaker talks VERY quickly.\n- You MUST create MORE subtitle entries with SHORTER text (max ${maxChars} characters each).\n- Each subtitle must appear and disappear EXACTLY when that phrase is spoken — precision is critical.\n- Subtitles must change rapidly to match the fast delivery. Do NOT group too many words together.\n- Start each subtitle slightly BEFORE the word is spoken (50ms early) so viewers can read along.`
-                        : '';
+                    // 1. Title Analysis is no longer needed here as it's either pre-generated 
+                    // or used directly in the cover generation prompt below.
 
-                    // Prompt to extract an accurate SRT
-                    const prompt = `You are a professional subtitler for shorts and reels videos.
-Please listen to the attached audio file in Thai language, and generate highly accurate sync-timed subtitles in SubRip (.srt) format.
-The spoken script text inside the audio should be exactly this:
-"${scriptText}"
-${paceNote}
-Rules:
-1. Wrap the text nicely. Limit each subtitle line to a maximum of ${maxChars} characters, split into nice logical chunks (short fragments) perfect for fast vertical videos.
-2. Provide ONLY the raw SRT format. Do not use markdown blocks like \`\`\`srt. Just output the text.
-3. Timestamps MUST strictly follow the standard SRT format exactly: HH:MM:SS,MMM --> HH:MM:SS,MMM (e.g., 00:00:01,250 --> 00:00:03,450). Notice the COMMA before the 3-digit milliseconds!
-4. Listen to the audio VERY carefully. Every timestamp must match EXACTLY when that word or phrase is actually spoken in the audio. Do NOT estimate or space evenly — sync to actual speech.
+                    // 1. Generate AI Cover Image if requested
+                    if (titleOverlay && titleOverlay.show && titleOverlay.type === 'ai_cover') {
+                        try {
+                            if (titleOverlay.useExistingCover && titleOverlay.existingCoverPath) {
+                                // Use the pre-generated cover
+                                let fullPathToExisting = titleOverlay.existingCoverPath;
+                                // Convert URL path to absolute local path if needed
+                                if (fullPathToExisting.startsWith('/api/uploads/images/')) {
+                                    const fileName = fullPathToExisting.replace('/api/uploads/images/', '');
+                                    fullPathToExisting = path.join(IMAGES_DIR, fileName);
+                                }
 
-Your SRT Output:`;
+                                if (fs.existsSync(fullPathToExisting)) {
+                                    imagePaths.unshift(fullPathToExisting);
+                                    console.log('Using existing AI Cover image:', fullPathToExisting);
+                                } else {
+                                    throw new Error('Existing cover not found at: ' + fullPathToExisting);
+                                }
+                            } else {
+                                // Generate NEW cover (rare case, fallback)
+                                console.log('Generating AI Cover Image with text (fallback mode)...');
+                                const activeTitleText = titleOverlay.activeTitleText || titleOverlay.projectName;
+                                const coverPrompt = `A premium, cinematic social media cover image (no people or faces, focused on aesthetics).
+The image MUST HAVE this exact THAI text title clearly and beautifully rendered in the center with modern typography: "${activeTitleText}".
+Style: Cinematic, high contrast, vibrant colors, premium quality, clear text rendering.
+Context: ${titleOverlay.projectName}.
+Aspect Ratio: ${titleOverlay.aspectRatio || '9:16'}`;
 
-                    const response = await ai.models.generateContent({
-                        model: 'gemini-2.5-flash',
-                        contents: [
-                            {
-                                role: 'user',
-                                parts: [
-                                    { text: prompt },
-                                    { inlineData: { data: audioBase64, mimeType } }
-                                ]
+                                const coverRes = await ai.models.generateContent({
+                                    model: 'gemini-3.1-flash-image-preview',
+                                    contents: coverPrompt,
+                                    config: {
+                                        responseModalities: ['image', 'text'],
+                                        imageConfig: { aspectRatio: titleOverlay.aspectRatio || '9:16' }
+                                    }
+                                });
+
+                                const parts = coverRes.candidates?.[0]?.content?.parts || [];
+                                const imagePart = parts.find(p => p.inlineData);
+                                if (imagePart) {
+                                    const coverId = uuidv4();
+                                    const fileName = `cover_${projectId || 'video'}_${coverId}.jpg`;
+                                    const filePath = path.join(IMAGES_DIR, fileName);
+                                    const imageBuffer = Buffer.from(imagePart.inlineData.data, 'base64');
+                                    fs.writeFileSync(filePath, imageBuffer);
+
+                                    // Prepend to imagePaths
+                                    imagePaths.unshift(filePath);
+                                    console.log('AI Cover image generated (fallback):', fileName);
+                                }
                             }
-                        ]
-                    });
-
-                    let rawSrt = response.text || '';
-                    rawSrt = rawSrt.replace(/```(srt|txt)?/ig, '').replace(/```/g, '').trim();
-                    rawSrt = rawSrt.replace(/\r\n/g, '\n');
-
-                    // Bulletproof SRT Formatting Algorithm to force perfect FFmpeg parsing
-                    function extractTime(timeStr) {
-                        if (!timeStr) return '00:00:00,000';
-                        const parts = timeStr.trim().split(/[^0-9]+/);
-                        const nums = parts.filter(p => p !== '');
-                        if (nums.length === 0) return '00:00:00,000';
-                        if (nums.length === 1) return '00:00:00,' + nums[0].padStart(3, '0').substring(0, 3);
-
-                        let ms = nums[nums.length - 1].padEnd(3, '0').substring(0, 3);
-                        let s = nums.length >= 2 ? nums[nums.length - 2].padStart(2, '0').substring(0, 2) : '00';
-                        let m = nums.length >= 3 ? nums[nums.length - 3].padStart(2, '0').substring(0, 2) : '00';
-                        let h = nums.length >= 4 ? nums[nums.length - 4].padStart(2, '0').substring(0, 2) : '00';
-
-                        return `${h}:${m}:${s},${ms}`;
-                    }
-
-                    const blocks = rawSrt.split(/\n\s*\n/);
-                    let finalSrt = '';
-                    let seq = 1;
-
-                    for (let block of blocks) {
-                        if (!block.trim()) continue;
-                        let lines = block.split('\n').map(l => l.trim()).filter(l => l !== '');
-                        let timeIdx = lines.findIndex(l => l.includes('-->'));
-
-                        if (timeIdx !== -1) {
-                            let timeParts = lines[timeIdx].split('-->');
-                            let start = extractTime(timeParts[0]);
-                            let end = extractTime(timeParts[1]);
-
-                            let textLines = lines.slice(timeIdx + 1).join('\n');
-                            finalSrt += seq + '\n' + start + ' --> ' + end + '\n' + textLines + '\n\n';
-                            seq++;
+                        } catch (e) {
+                            console.error('AI Cover generation/loading failed:', e);
                         }
                     }
 
-                    fs.writeFileSync(srtPath, finalSrt.trim());
-                    geminiSuccess = true;
-                    console.log('Gemini generated SRT successfully!');
+                    // 2. Generate SRT using Gemini audio analysis
+                    // Use gemini-2.5-flash for audio - it reliably supports multimodal audio input
+                    if (subtitle && scriptText) {
+                        console.log(`Attempting Gemini SRT generation (fastPace=${isFastPace})...`);
+                        const audioBuffer = fs.readFileSync(audioPath);
+                        const audioBase64 = audioBuffer.toString('base64');
+                        const ext = path.extname(audioPath).toLowerCase();
+                        let mimeType = 'audio/wav';
+                        if (ext === '.mp3') mimeType = 'audio/mp3';
+                        else if (ext === '.aac') mimeType = 'audio/aac';
+                        else if (ext === '.m4a') mimeType = 'audio/m4a';
+
+                        const prompt = `Listen to this Thai audio and create PERFECTLY SYNCHRONIZED .srt subtitles.
+
+RULES:
+1. Each subtitle MUST start at the EXACT moment the speaker begins that phrase.
+2. Each subtitle MUST end when the speaker finishes that phrase.
+3. Maximum 5 Thai words per subtitle line. NEVER cut a Thai word in half.
+4. Script reference: "${scriptText.substring(0, 2500)}"
+5. Return ONLY raw SRT. No markdown, no code blocks, no explanation.
+6. Timestamps: HH:MM:SS,MMM (COMMA before ms).
+7. The last subtitle should end near ${audioDuration.toFixed(1)} seconds.
+${isFastPace ? '8. Fast speech - use shorter segments.' : ''}`;
+
+                        const result = await ai.models.generateContent({
+                            model: 'gemini-2.5-flash',
+                            contents: [
+                                {
+                                    role: 'user',
+                                    parts: [
+                                        { text: prompt },
+                                        { inlineData: { data: audioBase64, mimeType } }
+                                    ]
+                                }
+                            ]
+                        });
+
+                        let rawSrt = "";
+                        try {
+                            if (result && result.response && typeof result.response.text === 'function') {
+                                rawSrt = result.response.text();
+                            } else if (result && typeof result.text === 'string') {
+                                rawSrt = result.text;
+                            } else if (result && typeof result.text === 'function') {
+                                rawSrt = result.text();
+                            } else {
+                                throw new Error('Cannot extract text from Gemini response');
+                            }
+                        } catch (e) {
+                            console.error("Gemini response error:", e.message);
+                            throw e;
+                        }
+
+                        if (rawSrt && rawSrt.includes('-->')) {
+                            rawSrt = rawSrt.replace(/```(srt|txt)?/ig, '').replace(/```/g, '').trim();
+                            rawSrt = rawSrt.replace(/\r\n/g, '\n');
+
+                            function timeToSec(t) {
+                                const match = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+                                if (!match) return 0;
+                                return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 1000;
+                            }
+
+                            // Parse all valid blocks
+                            const entries = [];
+                            const blocks = rawSrt.split(/\n\s*\n/);
+                            for (const block of blocks) {
+                                if (!block.trim()) continue;
+                                const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+                                const timeIdx = lines.findIndex(l => l.includes('-->'));
+                                if (timeIdx === -1) continue;
+
+                                const [rawStart, rawEnd] = lines[timeIdx].split('-->');
+                                const startSec = timeToSec(rawStart);
+                                const endSec = timeToSec(rawEnd);
+                                const text = lines.slice(timeIdx + 1).join('\n').trim();
+
+                                if (endSec > startSec && endSec > 0 && text) {
+                                    entries.push({ startSec, endSec, text });
+                                }
+                            }
+
+                            // Validate
+                            const lastEnd = entries.length > 0 ? entries[entries.length - 1].endSec : 0;
+                            const isOrdered = entries.every((e, i) => i === 0 || e.startSec >= entries[i - 1].startSec);
+
+                            if (entries.length >= 3 && isOrdered && lastEnd > 3) {
+                                // Drift correction: scale timestamps if they don't match audio duration
+                                const scale = lastEnd > 0 ? audioDuration / lastEnd : 1;
+                                const needsScale = Math.abs(lastEnd - audioDuration) > 1.5;
+
+                                let finalSrt = '';
+                                entries.forEach((e, i) => {
+                                    const s = needsScale ? e.startSec * scale : e.startSec;
+                                    const en = needsScale ? e.endSec * scale : e.endSec;
+                                    finalSrt += `${i + 1}\n${formatTime(s)} --> ${formatTime(Math.min(en, audioDuration))}\n${e.text}\n\n`;
+                                });
+
+                                fs.writeFileSync(srtPath, finalSrt.trim());
+                                geminiSuccess = true;
+                                console.log(`✅ Gemini SRT: ${entries.length} blocks, last=${lastEnd.toFixed(1)}s, audio=${audioDuration.toFixed(1)}s${needsScale ? `, scaled x${scale.toFixed(2)}` : ''}`);
+                            } else {
+                                console.log(`❌ Gemini SRT rejected: ${entries.length} blocks, ordered=${isOrdered}, lastEnd=${lastEnd.toFixed(1)}s`);
+                            }
+                        } else {
+                            console.log('❌ Gemini returned no SRT content');
+                        }
+                    }
                 }
             } catch (geminiError) {
-                console.error('Gemini SRT generation failed, falling back to algorithmic sync:', geminiError.message);
+                console.error('Gemini SRT failed:', geminiError.message);
             }
 
-            // Fallback algorithm if Gemini failed or no API key
-            if (!geminiSuccess) {
-                createSrtFile(scriptText, audioDuration, srtPath, isFastPace);
+            if (!geminiSuccess && subtitle && scriptText) {
+                console.log('⚠️ Using fallback SRT algorithm...');
+                const fallbackKey = await getActiveKey();
+                await createSrtFile(scriptText, audioDuration, srtPath, isFastPace, fallbackKey);
             }
         }
 
-        let ffmpegCmd;
-
-        // Ensure subtitle string works in FFmpeg filter without drive letter colon escaping issues
         let subtitleFilter = '';
-        if (srtRelativePath) {
+        if (srtPath) {
             const fontsDir = 'data/fonts';
-            const srtFile = srtRelativePath;
             const isPortrait = height > width;
 
-            // 1. Process Font Size — use exact pixel value from client
-            const fontSize = (subtitleStyle && subtitleStyle.size) ? parseInt(subtitleStyle.size) || 48 : 48;
+            // Font size: larger for impact, scaled for portrait
+            let baseFontSize = (subtitleStyle && subtitleStyle.size) ? parseInt(subtitleStyle.size) || 58 : 58;
+            // For portrait (1080x1920): scale to fit but keep it bold and readable
+            const fontSize = isPortrait ? Math.round(baseFontSize * 0.75) : baseFontSize;
 
-            // 2. Process Colors
-            let primaryColor = '&H00FFFFFF'; // White
-            let outlineColor = '&H00000000'; // Black
+            let primaryColor = '&H00FFFFFF'; // White text
+            let outlineColor = '&H00000000'; // Black outline
+            let backColor = '&H80000000';    // Semi-transparent black shadow
+            if (subtitleStyle && subtitleStyle.color === 'yellow_black') { primaryColor = '&H0000E6FF'; }
+            else if (subtitleStyle && subtitleStyle.color === 'black_white') { primaryColor = '&H00000000'; outlineColor = '&H00FFFFFF'; backColor = '&H80FFFFFF'; }
 
-            if (subtitleStyle && subtitleStyle.color === 'yellow_black') {
-                primaryColor = '&H0000E6FF'; // ASS colors are BGR: FF E6 00 -> 00 E6 FF
-            } else if (subtitleStyle && subtitleStyle.color === 'black_white') {
-                primaryColor = '&H00000000'; // Black
-                outlineColor = '&H00FFFFFF'; // White
-            }
+            // Thick outline for readability (like the reference image)
+            let outline = '4';
+            if (subtitleStyle && subtitleStyle.bg === 'thin') outline = '2';
+            else if (subtitleStyle && subtitleStyle.bg === 'thick') outline = '5';
+            let shadow = '2'; // Drop shadow for depth
 
-            // 3. Process Outline Thickness (clean outline, no background box)
-            let outline = '2';
-            if (subtitleStyle && subtitleStyle.bg === 'thin') {
-                outline = '1';
-            } else if (subtitleStyle && subtitleStyle.bg === 'thick') {
-                outline = '3';
-            }
-
-            // 4. Process Font
             const selectedFont = (subtitleStyle && subtitleStyle.font) ? subtitleStyle.font : 'Kanit';
+            let alignment = '2'; // Bottom center
+            let marginV = isPortrait ? 140 : 60;
+            let marginLR = isPortrait ? 50 : 20;
+            if (subtitleStyle && subtitleStyle.pos === 'top') { alignment = '8'; marginV = isPortrait ? 140 : 60; }
+            else if (subtitleStyle && subtitleStyle.pos === 'center') { alignment = '5'; marginV = 0; }
 
-            // 5. Process Position (ASS Alignment: 2=bottom-center, 5=mid-center, 8=top-center)
-            let alignment = '2';
-            let marginV = isPortrait ? 100 : 50;
-
-            if (subtitleStyle && subtitleStyle.pos === 'top') {
-                alignment = '8';
-                marginV = isPortrait ? 100 : 50;
-            } else if (subtitleStyle && subtitleStyle.pos === 'center') {
-                alignment = '5';
-                marginV = 0;
-            }
-
-            // 6. Generate proper ASS file from SRT for perfect Thai font rendering
-            const srtContent = fs.readFileSync(srtPath, 'utf8');
             const assPath = srtPath.replace('.srt', '.ass');
             const assRelativePath = srtRelativePath.replace('.srt', '.ass');
-
-            // Build ASS content with explicit \n (UNIX line endings required by libass)
             const assLines = [
                 '[Script Info]',
                 'ScriptType: v4.00+',
                 `PlayResX: ${width}`,
                 `PlayResY: ${height}`,
-                'WrapStyle: 1',
+                'WrapStyle: 0',
                 '',
                 '[V4+ Styles]',
                 'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-                `Style: Default,${selectedFont},${fontSize},${primaryColor},&H000000FF,${outlineColor},&H00000000,-1,0,0,0,100,100,0,0,1,${outline},0,${alignment},10,10,${marginV},1`,
+                `Style: Default,${selectedFont},${fontSize},${primaryColor},&H000000FF,${outlineColor},${backColor},-1,0,0,0,100,100,0,0,1,${outline},${shadow},${alignment},${marginLR},${marginLR},${marginV},1`,
                 '',
                 '[Events]',
                 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
             ];
 
-            // Parse SRT blocks into ASS Dialogue lines
-            const srtBlocks = srtContent.replace(/\r\n/g, '\n').split(/\n\s*\n/);
-            for (const block of srtBlocks) {
-                if (!block.trim()) continue;
-                const lines = block.split('\n').map(l => l.trim()).filter(l => l !== '');
-                const timeIdx = lines.findIndex(l => l.includes('-->'));
-                if (timeIdx === -1) continue;
-
-                const timeParts = lines[timeIdx].split('-->');
-                // Convert SRT time HH:MM:SS,mmm to ASS time H:MM:SS.cc
-                const toAss = (t) => {
-                    const m = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
-                    if (!m) return '0:00:00.00';
-                    const cs = Math.round(parseInt(m[4]) / 10); // round for better accuracy
-                    return `${parseInt(m[1])}:${m[2]}:${m[3]}.${Math.min(cs, 99).toString().padStart(2, '0')}`;
-                };
-
-                const start = toAss(timeParts[0]);
-                const end = toAss(timeParts[1]);
-                const text = lines.slice(timeIdx + 1).join('\\N');
-
-                assLines.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`);
+            if (subtitle && scriptText && fs.existsSync(srtPath)) {
+                const srtContent = fs.readFileSync(srtPath, 'utf8');
+                const srtBlocks = srtContent.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+                for (const block of srtBlocks) {
+                    if (!block.trim()) continue;
+                    const lines = block.split('\n').map(l => l.trim()).filter(l => l !== '');
+                    const timeIdx = lines.findIndex(l => l.includes('-->'));
+                    if (timeIdx === -1) continue;
+                    const timeParts = lines[timeIdx].split('-->');
+                    const toAss = (t) => {
+                        const m = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+                        if (!m) return '0:00:00.00';
+                        const cs = Math.round(parseInt(m[4]) / 10);
+                        return `${parseInt(m[1])}:${m[2]}:${m[3]}.${Math.min(cs, 99).toString().padStart(2, '0')}`;
+                    };
+                    const start = toAss(timeParts[0]);
+                    const end = toAss(timeParts[1]);
+                    const text = lines.slice(timeIdx + 1).join('\\N');
+                    assLines.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`);
+                }
             }
-
-            // Write with UNIX line endings (\n only)
             fs.writeFileSync(assPath, assLines.join('\n') + '\n');
-            console.log(`ASS file generated: ${assPath} (${assLines.length} lines, ${srtBlocks.length} blocks)`);
-
             subtitleFilter = `,ass='${assRelativePath}':fontsdir='${fontsDir}'`;
+        }
+
+        let ffmpegCmd;
+        let coverDuration = 0;
+        let otherImageDuration = 0;
+        const hasCover = titleOverlay && titleOverlay.show && titleOverlay.type === 'ai_cover';
+
+        if (hasCover && imagePaths.length > 1) {
+            coverDuration = parseFloat(titleOverlay.duration || 5);
+            // Safety: Don't let cover take more than 50% of audio
+            if (coverDuration > audioDuration * 0.5) coverDuration = audioDuration * 0.2;
+            otherImageDuration = (audioDuration - coverDuration) / (imagePaths.length - 1);
+        } else {
+            otherImageDuration = audioDuration / imagePaths.length;
+            coverDuration = otherImageDuration;
         }
 
         if (animationType === 'none') {
             const concatFile = path.join(VIDEOS_DIR, `concat_${videoId}.txt`);
             let concatContent = '';
-            imagePaths.forEach(imgPath => {
-                concatContent += `file '${imgPath}'\nduration ${imageDuration}\n`;
+            imagePaths.forEach((imgPath, idx) => {
+                const duration = (idx === 0 && hasCover) ? coverDuration : otherImageDuration;
+                concatContent += `file '${imgPath}'\nduration ${duration}\n`;
             });
+            // Repeat last image for stability
             concatContent += `file '${imagePaths[imagePaths.length - 1]}'\n`;
             fs.writeFileSync(concatFile, concatContent);
 
@@ -380,77 +581,111 @@ Your SRT Output:`;
                 `"${outputPath}"`
             ].join(' ');
 
-            console.log('Running FFmpeg (no animation):', ffmpegCmd.substring(0, 120), '...');
             await execAsync(ffmpegCmd, { timeout: 300000 });
-
             if (fs.existsSync(concatFile)) fs.unlinkSync(concatFile);
         } else {
+            // --- Version with Transitions (Cross-dissolve) ---
             const segmentFiles = [];
             const scaleW = width * 3;
             const scaleH = height * 3;
+            const transDur = 0.5; // 0.5 sec transition
 
+            // 1. Generate individual MP4 segments for each image
+            console.log('Generating segments for transitions...');
             for (let i = 0; i < imagePaths.length; i++) {
+                const baseDuration = (i === 0 && hasCover) ? coverDuration : otherImageDuration;
+                // Add padding for transition (except last image)
+                const isLast = i === imagePaths.length - 1;
+                const segDuration = isLast ? baseDuration : baseDuration + transDur;
+                const currentAnimType = (i === 0 && hasCover) ? 'none' : animationType;
+
                 const segPath = path.join(VIDEOS_DIR, `seg_${videoId}_${i}.mp4`);
                 segmentFiles.push(segPath);
 
-                const filter = getAnimationFilter(animationType, i, imageDuration, width, height);
-
+                const filter = getAnimationFilter(currentAnimType, i, segDuration, width, height);
                 const segCmd = [
                     'ffmpeg -y',
-                    `-loop 1 -i "${imagePaths[i]}"`,
+                    `-loop 1 -r 30 -i "${imagePaths[i]}"`,
                     `-vf "scale=${scaleW}:${scaleH}:force_original_aspect_ratio=decrease,pad=${scaleW}:${scaleH}:(ow-iw)/2:(oh-ih)/2:black,${filter},format=yuv420p"`,
-                    `-t ${imageDuration}`,
-                    `-c:v libx264 -preset medium -crf 23`,
-                    `-an`,
+                    `-r 30 -t ${segDuration}`,
+                    `-c:v libx264 -preset ultrafast -crf 23 -an`,
                     `"${segPath}"`
                 ].join(' ');
-
-                console.log(`Segment ${i + 1}/${imagePaths.length}: ${animationType}`);
-                await execAsync(segCmd, { timeout: 0, maxBuffer: 1024 * 1024 * 100 });
+                await execAsync(segCmd);
             }
 
-            const concatFile = path.join(VIDEOS_DIR, `concat_${videoId}.txt`);
-            const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
-            fs.writeFileSync(concatFile, concatContent);
+            // 2. Build Complex Filter for XFADE
+            console.log('Building xfade filter graph...');
+            let filterComplex = "";
+            let currentOffset = 0;
+
+            // Basic inputs: [0:v][1:v]...[N:v]
+            for (let i = 0; i < imagePaths.length; i++) {
+                const baseDuration = (i === 0 && hasCover) ? coverDuration : otherImageDuration;
+
+                if (i === 0) {
+                    // First segment, no xfade yet, just pass it through
+                    filterComplex += `[${i}:v]setpts=PTS-STARTPTS[v${i}];`;
+                    currentOffset += baseDuration;
+                } else {
+                    const prevLabel = `v${i - 1}`;
+                    const currentLabel = `${i}:v`;
+                    const outLabel = `v${i}`;
+
+                    // The offset for xfade is the point in the output stream where the second input starts.
+                    // This is the cumulative duration of previous segments minus the transition duration.
+                    const xfadeOffset = currentOffset - transDur;
+
+                    filterComplex += `[${prevLabel}][${currentLabel}]xfade=transition=fade:duration=${transDur}:offset=${xfadeOffset}[${outLabel}];`;
+                    currentOffset += baseDuration;
+                }
+            }
+
+            // Apply subtitle filter to the final video stream
+            filterComplex += `[v${imagePaths.length - 1}]format=yuv420p${subtitleFilter}[vfinal]`;
+
 
             let ffmpegArgs = [
                 'ffmpeg -y',
-                `-f concat -safe 0 -i "${concatFile}"`,
+                ...segmentFiles.map(f => `-i "${f}"`),
                 `-i "${audioPath}"`
             ];
 
             let audioMapping = `-c:a aac -b:a 192k`;
-
             if (bgmFile) {
                 const bgmPath = path.join(ROOT_DIR, 'data', 'bgm', bgmFile);
                 if (fs.existsSync(bgmPath)) {
                     ffmpegArgs.push(`-stream_loop -1 -i "${bgmPath}"`);
                     const vol = bgmVolume !== undefined ? bgmVolume : 0.2;
-                    audioMapping = `-filter_complex "[2:a]volume=${vol}[bgm];[1:a][bgm]amix=inputs=2:duration=first[aout]" -map 0:v -map "[aout]" -c:a aac -b:a 192k`;
+                    // Audio inputs: [imagePaths.length] is main audio, [imagePaths.length + 1] is BGM
+                    audioMapping = `-filter_complex "[${imagePaths.length + 1}:a]volume=${vol}[bgm];[${imagePaths.length}:a][bgm]amix=inputs=2:duration=first[aout]" -map "[vfinal]" -map "[aout]"`;
+                } else {
+                    // BGM file not found, just map main audio
+                    audioMapping = `-map "[vfinal]" -map ${imagePaths.length}:a`;
                 }
+            } else {
+                // No BGM, just map main audio
+                audioMapping = `-map "[vfinal]" -map ${imagePaths.length}:a`;
             }
 
             ffmpegCmd = [
                 ...ffmpegArgs,
-                `-vf "format=yuv420p${subtitleFilter}"`,
+                `-filter_complex "${filterComplex}"`,
                 `-c:v libx264 -preset medium -crf 23`,
                 audioMapping,
-                `-shortest`,
-                `-movflags +faststart`,
+                `-shortest -movflags +faststart`,
                 `"${outputPath}"`
             ].join(' ');
 
-            console.log('Concatenating segments...');
-            await execAsync(ffmpegCmd, { timeout: 0, maxBuffer: 1024 * 1024 * 100 });
+            await execAsync(ffmpegCmd, { timeout: 0, maxBuffer: 1024 * 1024 * 500 });
 
+            // Cleanup
             segmentFiles.forEach(f => { try { fs.unlinkSync(f); } catch { } });
-            if (fs.existsSync(concatFile)) fs.unlinkSync(concatFile);
         }
 
         if (srtPath && fs.existsSync(srtPath)) fs.unlinkSync(srtPath);
 
         const stats = fs.statSync(outputPath);
-
         return NextResponse.json({
             success: true,
             videoId,

@@ -1050,6 +1050,13 @@ window.runAutopilot = async function () {
                 animation: videoAnimation,
                 subtitle: videoSubtitle,
                 subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg },
+                titleOverlay: {
+                    show: true,
+                    aiAnalysis: true,
+                    style: 'modern',
+                    duration: 4,
+                    projectName: currentProject.name
+                },
                 scriptText: currentProject.steps.script.content,
                 ttsEmotion: ttsEmotion
             }
@@ -1620,6 +1627,51 @@ function updateVideoAssets() {
     }
 }
 
+// --- Generate Cover Preview ---
+window.currentCoverImage = null;
+window.generateCoverPreview = async function () {
+    if (!currentProject) return;
+
+    const btn = document.getElementById('btn-preview-cover');
+    const spinner = document.getElementById('spinner-cover');
+    const previewArea = document.getElementById('cover-preview-area');
+    const previewImg = document.getElementById('cover-preview-img');
+    const previewText = document.getElementById('cover-preview-text');
+
+    btn.disabled = true;
+    spinner.classList.remove('hidden');
+
+    const aiAnalysis = document.getElementById('title-ai-analysis')?.value === 'yes';
+    const format = document.getElementById('video-format').value;
+    const aspectRatio = format === 'youtube_doc' || format === 'podcast' ? '16:9' : '9:16';
+
+    try {
+        const result = await api('/video/generate-cover', {
+            method: 'POST',
+            body: {
+                projectName: currentProject.name,
+                aiAnalysis,
+                aspectRatio,
+                projectId: currentProject.id
+            }
+        });
+
+        if (result.success) {
+            window.currentCoverImage = result.filePath;
+            window.currentHookText = result.hookText;
+            previewImg.src = result.filePath;
+            previewText.textContent = `🎯 พาดหัวที่ AI วิเคราะห์: "${result.hookText}"`;
+            previewArea.classList.remove('hidden');
+            showToast('สร้างพรีวิวหน้าปกสำเร็จ!', 'success');
+        }
+    } catch (err) {
+        showToast('สร้างพรีวิวหน้าปกล้มเหลว: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+};
+
 window.createVideo = async function () {
     if (!currentProject) return;
 
@@ -1655,6 +1707,11 @@ window.createVideo = async function () {
     // Get TTS emotion to help subtitle sync for fast-paced speech
     const ttsEmotion = currentProject.steps?.audio?.emotion || document.getElementById('tts-emotion')?.value || 'neutral';
 
+    // Title Overlay Settings
+    const showTitleOverlay = document.getElementById('check-title-overlay')?.checked || false;
+    const titleAiAnalysis = document.getElementById('title-ai-analysis')?.value === 'yes';
+    const titleDuration = parseInt(document.getElementById('title-duration')?.value || '4');
+
     try {
         showToast('🎬 กำลังสร้างวิดีโอ... อาจใช้เวลา 1-2 นาที', 'info');
 
@@ -1668,6 +1725,17 @@ window.createVideo = async function () {
                 animation,
                 subtitle,
                 subtitleStyle: { font: subFont, size: subSize, color: subColor, bg: subBg, pos: subPos },
+                titleOverlay: {
+                    show: showTitleOverlay,
+                    type: 'ai_cover',
+                    aiAnalysis: titleAiAnalysis,
+                    duration: titleDuration,
+                    projectName: currentProject.name,
+                    activeTitleText: window.currentHookText || currentProject.name,
+                    aspectRatio: format === 'youtube_doc' || format === 'podcast' ? '16:9' : '9:16',
+                    useExistingCover: !!window.currentCoverImage,
+                    existingCoverPath: window.currentCoverImage
+                },
                 scriptText: currentProject.steps.script.content,
                 bgmFile,
                 bgmVolume: parseFloat(bgmVolume) / 100,
