@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { getSettings } from '@/lib/settings';
+import { getSettings, saveSettings } from '@/lib/settings';
+
+const REDIRECT_URI = 'http://localhost:3000/api/settings/youtube/oauth2callback';
 
 // POST /api/settings/youtube/test
 export async function POST(request) {
@@ -21,8 +23,24 @@ export async function POST(request) {
             return NextResponse.json({ error: 'ระบบไม่ได้ตั้งค่า Client ID / Secret ไว้' }, { status: 400 });
         }
 
-        const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret);
+        const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret, REDIRECT_URI);
         oauth2Client.setCredentials(channel.tokens);
+
+        // Listen for token refresh events and save updated tokens
+        oauth2Client.on('tokens', async (newTokens) => {
+            try {
+                const latestSettings = await getSettings();
+                const ch = (latestSettings.youtubeChannels || []).find(c => c.id === channelId);
+                if (ch) {
+                    ch.tokens = { ...ch.tokens, ...newTokens };
+                    await saveSettings(latestSettings);
+                    console.log('YouTube tokens refreshed and saved for channel:', channelId);
+                }
+            } catch (e) {
+                console.error('Failed to save refreshed tokens:', e);
+            }
+        });
+
         const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
         const response = await youtube.channels.list({
@@ -43,6 +61,16 @@ export async function POST(request) {
         }
     } catch (err) {
         console.error('YouTube test error:', err);
+
+        // Handle invalid_grant specifically - token is expired/revoked
+        if (err.message === 'invalid_grant' || err.code === 400) {
+            return NextResponse.json({
+                success: false,
+                message: 'Token หมดอายุหรือถูกเพิกถอน กรุณาเชื่อมต่อ YouTube ใหม่อีกครั้ง (คลิก "เพิ่มช่อง YouTube")',
+                needReauth: true
+            });
+        }
+
         return NextResponse.json({
             success: false,
             message: err.message || 'เกิดข้อผิดพลาดในการตรวจสอบ'

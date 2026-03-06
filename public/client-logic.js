@@ -398,6 +398,53 @@ window.createProject = async function () {
     }
 };
 
+// --- AI Generate Description ---
+window.aiGenerateDescription = async function () {
+    const name = document.getElementById('input-name').value.trim();
+    if (!name) {
+        showToast('กรุณาใส่ชื่อโปรเจคก่อน แล้วกดให้ AI คิดคำอธิบาย', 'warning');
+        return;
+    }
+
+    const btn = document.getElementById('btn-ai-desc');
+    const spinner = document.getElementById('spinner-ai-desc');
+    const descEl = document.getElementById('input-description');
+    const platform = document.getElementById('input-platform')?.value || 'youtube_shorts';
+
+    const platformNames = {
+        youtube_shorts: 'YouTube Shorts',
+        podcast: 'Podcast',
+        tiktok: 'TikTok',
+        reels: 'Instagram Reels'
+    };
+
+    btn.disabled = true;
+    spinner.classList.remove('hidden');
+
+    try {
+        const result = await api('/ai/chat', {
+            method: 'POST',
+            body: {
+                message: `จากหัวข้อ "${name}" สำหรับแพลตฟอร์ม ${platformNames[platform] || platform}
+
+ช่วยเขียนคำอธิบายสั้นๆ 2-3 ประโยค ที่อธิบายเนื้อหาวิดีโอนี้ เพื่อนำไปใช้เป็นแนวทางในการเขียนสคริปต์
+
+ตอบเป็นข้อความธรรมดา ไม่ต้องมีหัวข้อ ไม่ต้องมี markdown ไม่ต้องมี emoji ตอบสั้นๆ กระชับ ตรงประเด็น`
+            }
+        });
+
+        if (result.reply) {
+            descEl.value = result.reply.trim();
+            showToast('✨ AI สร้างคำอธิบายเรียบร้อย!', 'success');
+        }
+    } catch (err) {
+        showToast('AI สร้างคำอธิบายล้มเหลว: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+    }
+};
+
 window.openProject = async function (projectId) {
     document.getElementById('nav-project').style.display = 'flex';
     navigateTo('project', { projectId });
@@ -1760,6 +1807,7 @@ window.createVideo = async function () {
                 status: 'done',
                 filePath: result.filePath,
                 fileName: result.fileName,
+                thumbnailPath: result.thumbnailPath || null,
                 resolution: result.resolution,
                 generatedAt: new Date().toISOString()
             }
@@ -2451,19 +2499,25 @@ async function loadYouTubeSettings() {
 
             // Render channels list in settings
             if (listEl) {
-                listEl.innerHTML = channels.map(c => `
-                    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(255, 0, 0, 0.08); border: 1px solid rgba(255, 0, 0, 0.2); border-radius: var(--radius-md); margin-bottom: 8px;">
-                        <span style="font-size: 1.5rem;">🔴</span>
+                listEl.innerHTML = channels.map(c => {
+                    const isExpired = c.tokenExpired;
+                    const statusIcon = isExpired ? '🔴' : '🟢';
+                    const bgColor = isExpired ? 'rgba(255, 0, 0, 0.08)' : 'rgba(74, 222, 128, 0.08)';
+                    const borderColor = isExpired ? 'rgba(255, 0, 0, 0.2)' : 'rgba(74, 222, 128, 0.2)';
+                    return `
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: ${bgColor}; border: 1px solid ${borderColor}; border-radius: var(--radius-md); margin-bottom: 8px;">
+                        <span style="font-size: 1.5rem;">${statusIcon}</span>
                         <div style="flex: 1; min-width: 0;">
                             <strong>${escapeHtml(c.title)}</strong>
                             <span style="color: var(--text-muted); font-size: 0.8rem; display: block;">
                                 เชื่อมต่อเมื่อ: ${new Date(c.addedAt).toLocaleString('th-TH')}
                             </span>
                         </div>
+                        <button class="btn btn-sm" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; cursor: pointer;" onclick="renewYouTubeToken('${c.id}')" title="ต่ออายุ Token">🔄 ต่ออายุ</button>
                         <button class="btn btn-sm btn-secondary" onclick="testExistingYoutubeChannel('${c.id}')" title="ทดสอบ">ทดสอบ</button>
                         <button class="btn btn-sm btn-danger" onclick="disconnectYouTube('${c.id}')" title="ยกเลิกการเชื่อมต่อ">🗑️</button>
                     </div>
-                `).join('');
+                `}).join('');
 
                 // Add a button to add more channels
                 listEl.innerHTML += `
@@ -2561,6 +2615,20 @@ window.disconnectYouTube = async function (id) {
     }
 };
 
+window.renewYouTubeToken = async function (channelId) {
+    try {
+        showToast('🔄 กำลังเปิดหน้าต่อ OAuth เพื่อต่ออายุ Token...', 'info');
+        const result = await api('/settings/youtube/auth-url');
+        if (result.url) {
+            window.location.href = result.url;
+        } else {
+            throw new Error('ไม่พบ Auth URL');
+        }
+    } catch (err) {
+        showToast('ไม่สามารถต่ออายุ Token ได้: ' + err.message, 'error');
+    }
+};
+
 window.testExistingYoutubeChannel = async function (channelId) {
     try {
         showToast('กำลังทดสอบการเชื่อมต่อ YouTube...', 'info');
@@ -2571,6 +2639,7 @@ window.testExistingYoutubeChannel = async function (channelId) {
 
         if (result.success) {
             showToast(`✅ ${result.message}`, 'success');
+            await loadYouTubeSettings();
         } else {
             showToast(`❌ ${result.message}`, 'error');
         }
@@ -2643,6 +2712,7 @@ window.publishToYouTube = async function () {
             method: 'POST',
             body: {
                 videoFilePath: currentProject.steps.video.filePath,
+                thumbnailPath: currentProject.steps.video.thumbnailPath || null,
                 title: title,
                 description: fullDescription,
                 tags: tags,
@@ -2728,6 +2798,7 @@ window.saveFacebookSettings = saveFacebookSettings;
 window.testFacebookToken = testFacebookToken;
 window.saveYouTubeKeys = saveYouTubeKeys;
 window.connectYouTube = connectYouTube;
+window.renewYouTubeToken = renewYouTubeToken;
 window.publishToFacebook = publishToFacebook;
 window.publishToYouTube = publishToYouTube;
 window.toggleSchedule = toggleSchedule;

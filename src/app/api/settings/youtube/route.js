@@ -25,10 +25,19 @@ export async function GET() {
         clientId: settings.youtubeClientId || '',
         clientSecretMasked: settings.youtubeClientSecret ? '•'.repeat(16) : '',
         hasKeys: !!(settings.youtubeClientId && settings.youtubeClientSecret),
-        channels: channels.map(c => ({
-            id: c.id,
-            title: c.title,
-            addedAt: c.addedAt
-        }))
+        channels: channels.map(c => {
+            // Check if token is expired
+            const now = Date.now();
+            const expiryDate = c.tokens?.expiry_date || 0;
+            const hasRefreshToken = !!c.tokens?.refresh_token;
+            // Consider expired if no tokens, no refresh token, or access token expired more than 1 hour ago
+            const tokenExpired = !c.tokens || (!hasRefreshToken && expiryDate < now);
+            return {
+                id: c.id,
+                title: c.title,
+                addedAt: c.addedAt,
+                tokenExpired
+            };
+        })
     });
 }

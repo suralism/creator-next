@@ -171,7 +171,15 @@ function CreatePage() {
                     </div>
 
                     <div className="form-group">
-                        <label htmlFor="input-description">คำอธิบาย / หัวข้อ</label>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <label htmlFor="input-description" style={{ margin: 0 }}>คำอธิบาย / หัวข้อ</label>
+                            <button type="button" className="btn btn-sm" id="btn-ai-desc"
+                                style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)', color: 'white', border: 'none', fontSize: '0.8rem', padding: '4px 12px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                onClick={() => window.aiGenerateDescription?.()}>
+                                <span id="spinner-ai-desc" className="hidden" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid white', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }}></span>
+                                ✨ AI คิดให้
+                            </button>
+                        </div>
                         <textarea id="input-description" rows="3"
                             placeholder="อธิบายเนื้อหาที่อยากทำ หรือใส่หัวข้อให้ AI คิดบทให้"></textarea>
                     </div>

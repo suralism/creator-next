@@ -31,7 +31,8 @@ export async function POST(request) {
             if (!targetChannel && channels.length > 0) targetChannel = channels[0];
             if (!targetChannel) continue;
 
-            const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret);
+            const redirectUri = 'http://localhost:3000/api/settings/youtube/oauth2callback';
+            const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret, redirectUri);
             oauth2Client.setCredentials(targetChannel.tokens);
 
             const youtube = google.youtube({ version: 'v3', auth: oauth2Client });

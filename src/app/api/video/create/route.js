@@ -685,12 +685,27 @@ ${isFastPace ? '8. Fast speech - use shorter segments.' : ''}`;
 
         if (srtPath && fs.existsSync(srtPath)) fs.unlinkSync(srtPath);
 
+        // Extract first frame as thumbnail
+        let thumbnailPath = null;
+        try {
+            const thumbFileName = `thumb_${projectId || 'video'}_${videoId}.jpg`;
+            const thumbAbsPath = path.join(IMAGES_DIR, thumbFileName);
+            await execAsync(`ffmpeg -y -i "${outputPath}" -ss 0.1 -vframes 1 -q:v 2 "${thumbAbsPath}"`);
+            if (fs.existsSync(thumbAbsPath)) {
+                thumbnailPath = `/api/uploads/images/${thumbFileName}`;
+                console.log('📸 Thumbnail extracted:', thumbFileName);
+            }
+        } catch (thumbErr) {
+            console.error('Thumbnail extraction failed:', thumbErr.message);
+        }
+
         const stats = fs.statSync(outputPath);
         return NextResponse.json({
             success: true,
             videoId,
             fileName: outputFileName,
             filePath: `/api/uploads/videos/${outputFileName}`,
+            thumbnailPath,
             size: stats.size,
             duration: audioDuration,
             resolution: `${width}x${height}`,

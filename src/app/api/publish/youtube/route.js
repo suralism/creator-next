@@ -8,7 +8,7 @@ import { ROOT_DIR } from '@/lib/paths';
 // POST /api/publish/youtube
 export async function POST(request) {
     try {
-        const { videoFilePath, title, description, tags, privacyStatus = 'public', scheduledTime, channelId } = await request.json();
+        const { videoFilePath, thumbnailPath, title, description, tags, privacyStatus = 'public', scheduledTime, channelId } = await request.json();
 
         const settings = await getSettings();
         const { youtubeClientId, youtubeClientSecret, youtubeChannels } = settings;
@@ -31,7 +31,8 @@ export async function POST(request) {
             return NextResponse.json({ error: 'ไม่พบไฟล์วิดีโอ' }, { status: 400 });
         }
 
-        const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret);
+        const redirectUri = 'http://localhost:3000/api/settings/youtube/oauth2callback';
+        const oauth2Client = new google.auth.OAuth2(youtubeClientId, youtubeClientSecret, redirectUri);
         oauth2Client.setCredentials(selectedChannel.tokens);
 
         oauth2Client.on('tokens', (tokens) => {
@@ -85,15 +86,40 @@ export async function POST(request) {
         const videoId = response.data.id;
         const isScheduled = !!scheduledTime;
 
+        // Set custom thumbnail (first frame of video)
+        let thumbnailSet = false;
+        if (thumbnailPath) {
+            try {
+                const absThumbPath = path.join(ROOT_DIR, 'data', thumbnailPath.replace('/api/uploads/', '').replace('/uploads/', ''));
+                if (fs.existsSync(absThumbPath)) {
+                    await youtube.thumbnails.set({
+                        videoId: videoId,
+                        media: {
+                            mimeType: 'image/jpeg',
+                            body: fs.createReadStream(absThumbPath),
+                        },
+                    });
+                    thumbnailSet = true;
+                    console.log('🖼️ Custom thumbnail set successfully for video:', videoId);
+                } else {
+                    console.log('⚠️ Thumbnail file not found:', absThumbPath);
+                }
+            } catch (thumbErr) {
+                // Custom thumbnails require channel verification
+                console.error('⚠️ Failed to set thumbnail (channel may not be verified):', thumbErr.message);
+            }
+        }
+
         return NextResponse.json({
             success: true,
             videoId: videoId,
             postUrl: `https://youtu.be/${videoId}`,
+            thumbnailSet,
             scheduled: isScheduled,
             scheduledTime: scheduledTime || null,
             message: isScheduled
                 ? `⏰ ตั้งเวลาเผยแพร่ YouTube สำเร็จ! จะเผยแพร่ ${new Date(scheduledTime).toLocaleString('th-TH')}`
-                : 'เผยแพร่วิดีโอไป YouTube สำเร็จ!'
+                : 'เผยแพร่วิดีโอไป YouTube สำเร็จ!' + (thumbnailSet ? ' (ตั้ง thumbnail แล้ว)' : '')
         });
 
     } catch (err) {
